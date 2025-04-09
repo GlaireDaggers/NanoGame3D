@@ -1,0 +1,16 @@
+[package]
+name = "nanogame3d"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+gles2 = []
+
+[dependencies]
+byteorder = "1.5.0"
+gamemath = "0.5.0"
+sdl2 = "0.37.0"
+regex = "1.11.1"
+gl = "0.14.0"
+ktx = "0.3.2"
+lazy_static = "1.5.0"
