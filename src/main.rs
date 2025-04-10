@@ -3,7 +3,7 @@ use std::{ffi::CStr, fs::File};
 use bsp::{bspfile::BspFile, bsplightmap::BspLightmap, bsprenderer::{BspMapRenderer, BspMapTextures, NUM_CUSTOM_LIGHT_LAYERS}};
 use gamemath::Mat4;
 use graphics::gfx::{create_program, set_uniform_float};
-use misc::{mat4_translation, Vector3, Vector4, VEC3_UNIT_X, VEC3_UNIT_Y, VEC3_UNIT_Z, VEC3_ZERO};
+use misc::{mat4_translation, Vector3, VEC3_UNIT_Z, VEC3_ZERO};
 
 extern crate sdl2;
 extern crate gl;
@@ -96,6 +96,7 @@ fn main() {
     let timer_freq = 1.0 / (sdl_timer.performance_frequency() as f64);
 
     let mut rot: f32 = 0.0;
+    let mut anim_time: f32 = 0.0;
 
     let mut event_pump = sdl.event_pump().unwrap();
     'main: loop {
@@ -114,7 +115,8 @@ fn main() {
         let win_size = window.size();
         let aspect = win_size.0 as f32 / win_size.1 as f32;
 
-        rot += 20.0 * dt;
+        rot += 10.0 * dt;
+        anim_time += dt;
 
         unsafe { gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT) };
 
@@ -122,7 +124,7 @@ fn main() {
             * mat4_translation(Vector3::new(0.0, 0.0, -100.0))
             * Mat4::rotation(rot.to_radians(), VEC3_UNIT_Z);
         let cam_proj = Mat4::perspective(120.0_f32.to_radians(), aspect, 10.0, 10000.0);
-        bsp_renderer.draw_opaque(&bsp_data, &bsp_textures, &bsp_lightmap, 0.0, cam_view, cam_proj);
+        bsp_renderer.draw_opaque(&bsp_data, &bsp_textures, &bsp_lightmap, anim_time, cam_view, cam_proj);
 
         window.gl_swap_window();
     }

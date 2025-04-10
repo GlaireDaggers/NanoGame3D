@@ -143,11 +143,27 @@ pub fn set_uniform_int(program: u32, name: &str, value: i32) {
     }
 }
 
+pub fn set_uniform_int_array(program: u32, name: &str, value: &[i32]) {
+    unsafe {
+        let name_cstr = CString::new(name).unwrap();
+        let uniform_location = gl::GetUniformLocation(program, name_cstr.as_ptr());
+        gl::Uniform1iv(uniform_location, value.len() as i32, value.as_ptr());
+    }
+}
+
 pub fn set_uniform_float(program: u32, name: &str, value: f32) {
     unsafe {
         let name_cstr = CString::new(name).unwrap();
         let uniform_location = gl::GetUniformLocation(program, name_cstr.as_ptr());
         gl::Uniform1f(uniform_location, value);
+    }
+}
+
+pub fn set_uniform_float_array(program: u32, name: &str, value: &[f32]) {
+    unsafe {
+        let name_cstr = CString::new(name).unwrap();
+        let uniform_location = gl::GetUniformLocation(program, name_cstr.as_ptr());
+        gl::Uniform1fv(uniform_location, value.len() as i32, value.as_ptr());
     }
 }
 
@@ -159,11 +175,27 @@ pub fn set_uniform_vec2(program: u32, name: &str, value: Vector2) {
     }
 }
 
+pub fn set_uniform_vec2_array(program: u32, name: &str, value: &[Vector2]) {
+    unsafe {
+        let name_cstr = CString::new(name).unwrap();
+        let uniform_location = gl::GetUniformLocation(program, name_cstr.as_ptr());
+        gl::Uniform2fv(uniform_location, value.len() as i32, value.as_ptr() as *const _);
+    }
+}
+
 pub fn set_uniform_vec3(program: u32, name: &str, value: Vector3) {
     unsafe {
         let name_cstr = CString::new(name).unwrap();
         let uniform_location = gl::GetUniformLocation(program, name_cstr.as_ptr());
         gl::Uniform3f(uniform_location, value.x, value.y, value.z);
+    }
+}
+
+pub fn set_uniform_vec3_array(program: u32, name: &str, value: &[Vector3]) {
+    unsafe {
+        let name_cstr = CString::new(name).unwrap();
+        let uniform_location = gl::GetUniformLocation(program, name_cstr.as_ptr());
+        gl::Uniform3fv(uniform_location, value.len() as i32, value.as_ptr() as *const _);
     }
 }
 
@@ -175,10 +207,26 @@ pub fn set_uniform_vec4(program: u32, name: &str, value: Vector4) {
     }
 }
 
+pub fn set_uniform_vec4_array(program: u32, name: &str, value: &[Vector4]) {
+    unsafe {
+        let name_cstr = CString::new(name).unwrap();
+        let uniform_location = gl::GetUniformLocation(program, name_cstr.as_ptr());
+        gl::Uniform4fv(uniform_location, value.len() as i32, value.as_ptr() as *const _);
+    }
+}
+
 pub fn set_uniform_mat4(program: u32, name: &str, value: Mat4) {
     unsafe {
         let name_cstr = CString::new(name).unwrap();
         let uniform_location = gl::GetUniformLocation(program, name_cstr.as_ptr());
-        gl::UniformMatrix4fv(uniform_location, 1, 0, value.rows.as_ptr() as *const f32);
+        gl::UniformMatrix4fv(uniform_location, 1, 0, value.rows.as_ptr() as *const _);
+    }
+}
+
+pub fn set_uniform_mat4_array(program: u32, name: &str, value: &[Mat4]) {
+    unsafe {
+        let name_cstr = CString::new(name).unwrap();
+        let uniform_location = gl::GetUniformLocation(program, name_cstr.as_ptr());
+        gl::UniformMatrix4fv(uniform_location, value.len() as i32, 0, value.as_ptr() as *const _);
     }
 }
