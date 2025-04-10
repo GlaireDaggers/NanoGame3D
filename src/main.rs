@@ -34,6 +34,7 @@ void main() {
 fn main() {
     let sdl = sdl2::init().unwrap();
     let sdl_video = sdl.video().unwrap();
+    let sdl_timer = sdl.timer().unwrap();
 
     #[cfg(feature = "gles2")]
     {
@@ -87,6 +88,9 @@ fn main() {
     let light_layers = [0.0; NUM_CUSTOM_LIGHT_LAYERS];
     bsp_renderer.update(0.0, &light_layers, &bsp_data, &bsp_textures, VEC3_ZERO);
 
+    let mut prev_tick = sdl_timer.performance_counter();
+    let timer_freq = 1.0 / (sdl_timer.performance_frequency() as f64);
+
     let mut rot: f32 = 0.0;
 
     let mut event_pump = sdl.event_pump().unwrap();
@@ -98,10 +102,15 @@ fn main() {
             }
         }
 
+        let cur_tick = sdl_timer.performance_counter();
+        let diff_tick = cur_tick - prev_tick;
+        let dt = ((diff_tick as f64) * timer_freq) as f32;
+        prev_tick = cur_tick;
+
         let win_size = window.size();
         let aspect = win_size.0 as f32 / win_size.1 as f32;
 
-        rot += 0.04;
+        rot += 20.0 * dt;
 
         unsafe { gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT) };
 
