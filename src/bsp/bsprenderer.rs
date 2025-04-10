@@ -48,15 +48,13 @@ varying mediump vec4 vtx_color;
 uniform sampler2D mainTexture;
 uniform sampler2D lightmapTexture;
 
-uniform mediump float lightStyles[256];
-
 void main() {
     mediump vec4 lm = 
-        (texture2D(lightmapTexture, vtx_lm0.xy) * lightStyles[int(vtx_lm0.z)]) +
-        (texture2D(lightmapTexture, vtx_lm1.xy) * lightStyles[int(vtx_lm1.z)]) +
-        (texture2D(lightmapTexture, vtx_lm2.xy) * lightStyles[int(vtx_lm2.z)]) +
-        (texture2D(lightmapTexture, vtx_lm3.xy) * lightStyles[int(vtx_lm3.z)]);
-    gl_FragColor = texture2D(mainTexture, vtx_uv) * pow(lm, vec4(1.0/2.2)) * vtx_color * 2.0;
+        (texture2D(lightmapTexture, vtx_lm0.xy) * vtx_lm0.z) +
+        (texture2D(lightmapTexture, vtx_lm1.xy) * vtx_lm1.z) +
+        (texture2D(lightmapTexture, vtx_lm2.xy) * vtx_lm2.z) +
+        (texture2D(lightmapTexture, vtx_lm3.xy) * vtx_lm3.z);
+    gl_FragColor = texture2D(mainTexture, vtx_uv) * pow(lm, vec4(1.0 / 2.2)) * vtx_color * 2.0;
 }"#;
 
 lazy_static! {
@@ -87,7 +85,7 @@ fn make_light_table(data: &[u8]) -> Vec<f32> {
     output
 }
 
-fn unpack_face(bsp: &BspFile, textures: &BspMapTextures, face_idx: usize, edge_buffer: &mut Vec<Edge>, geo: &mut Vec<MapVertex>, index: &mut Vec<u16>, lm: &BspLightmap) {
+fn unpack_face(bsp: &BspFile, textures: &BspMapTextures, light_styles: &[f32], face_idx: usize, edge_buffer: &mut Vec<Edge>, geo: &mut Vec<MapVertex>, index: &mut Vec<u16>, lm: &BspLightmap) {
     let face = &bsp.face_lump.faces[face_idx];
     let tex_idx = face.texture_info as usize;
     let tex_info = &bsp.tex_info_lump.textures[tex_idx];
@@ -183,7 +181,7 @@ fn unpack_face(bsp: &BspFile, textures: &BspMapTextures, face_idx: usize, edge_b
         let mut lm_uvs = [VEC3_ZERO;4];
         for i in 0..4 {
             let lm_uv = vec2_mul(vec2_div(tex - tex_min, tex_max - tex_min), lm_region_scales[i]) + lm_region_offsets[i];
-            lm_uvs[i] = Vector3::new(lm_uv.x, lm_uv.y, face.lightmap_styles[i] as f32);
+            lm_uvs[i] = Vector3::new(lm_uv.x, lm_uv.y, light_styles[face.lightmap_styles[i] as usize]);
         }
 
         match &textures.loaded_textures[tex_idx] {
@@ -473,25 +471,30 @@ impl BspMapRenderer {
     }
 
     /// Call each frame before rendering. Recalculates visible leaves & rebuilds geometry when necessary
-    pub fn update(self: &mut Self, _anim_time: f32, _light_layers: &[f32;NUM_CUSTOM_LIGHT_LAYERS], bsp: &BspFile, textures: &BspMapTextures, lm: &BspLightmap, position: Vector3) {
+    pub fn update(self: &mut Self, anim_time: f32, _light_layers: &[f32;NUM_CUSTOM_LIGHT_LAYERS], bsp: &BspFile, textures: &BspMapTextures, lm: &BspLightmap, position: Vector3) {
         let leaf_index = bsp.calc_leaf_index(&position);
         let leaf = &bsp.leaf_lump.leaves[leaf_index as usize];
 
+        let lightstyle_frame = (anim_time * 10.0) as usize;
+        let mut light_styles = [0.0;256];
+
+        for (idx, tbl) in LIGHTSTYLES.iter().enumerate() {
+            light_styles[idx] = tbl[lightstyle_frame % tbl.len()];
+        }
+
         // only rebuild geometry when we enter a new leaf
-        if leaf_index == self.prev_leaf {
-            return;
-        }
+        if leaf_index != self.prev_leaf {
+             // unpack new cluster's visibility info
+            self.prev_leaf = leaf_index;
+            
+            self.vis.fill(false);
+            if leaf.cluster != u16::MAX {
+                bsp.vis_lump.unpack_vis(leaf.cluster as usize, &mut self.vis);
+            }
 
-        // unpack new cluster's visibility info
-        self.prev_leaf = leaf_index;
-        
-        self.vis.fill(false);
-        if leaf.cluster != u16::MAX {
-            bsp.vis_lump.unpack_vis(leaf.cluster as usize, &mut self.vis);
+            self.visible_leaves.fill(false);
+            Self::update_recursive(bsp, 0, &self.vis, &mut self.visible_leaves);
         }
-
-        self.visible_leaves.fill(false);
-        Self::update_recursive(bsp, 0, &self.vis, &mut self.visible_leaves);
 
         // build geometry for visible leaves
         for m in &mut self.mesh_vertices {
@@ -524,7 +527,7 @@ impl BspMapRenderer {
 
                     let face = &bsp.face_lump.faces[face_idx];
                     let tex_idx = face.texture_info as usize;
-                    unpack_face(bsp, textures, face_idx, &mut edges, &mut self.mesh_vertices[tex_idx], &mut self.mesh_indices[tex_idx], lm);
+                    unpack_face(bsp, textures, &light_styles, face_idx, &mut edges, &mut self.mesh_vertices[tex_idx], &mut self.mesh_indices[tex_idx], lm);
                 }
             }
         }
@@ -549,18 +552,9 @@ impl BspMapRenderer {
         }
     }
 
-    pub fn draw_opaque(self: &mut Self, _bsp: &BspFile, textures: &BspMapTextures, lm: &BspLightmap, animation_time: f32, camera_view: Mat4, camera_proj: Mat4) {
+    pub fn draw_opaque(self: &mut Self, _bsp: &BspFile, textures: &BspMapTextures, lm: &BspLightmap, _animation_time: f32, camera_view: Mat4, camera_proj: Mat4) {
         draw_opaque_geom_setup(&self.map_shader, Mat4::identity(), camera_view, camera_proj);
         bind_lightmap(lm);
-
-        let lightstyle_frame = (animation_time * 10.0) as usize;
-        let mut light_styles = [0.0;256];
-
-        for (idx, tbl) in LIGHTSTYLES.iter().enumerate() {
-            light_styles[idx] = tbl[lightstyle_frame % tbl.len()];
-        }
-
-        self.map_shader.set_uniform_float_array("lightStyles", &light_styles);
 
         for i in &textures.opaque_meshes {
             if self.mesh_indices[*i].len() > 0 {

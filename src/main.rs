@@ -90,7 +90,6 @@ fn main() {
     println!("BSP RENDERER INITIALIZED");
 
     let light_layers = [0.0; NUM_CUSTOM_LIGHT_LAYERS];
-    bsp_renderer.update(0.0, &light_layers, &bsp_data, &bsp_textures, &bsp_lightmap, VEC3_ZERO);
 
     let mut prev_tick = sdl_timer.performance_counter();
     let timer_freq = 1.0 / (sdl_timer.performance_frequency() as f64);
@@ -117,6 +116,8 @@ fn main() {
 
         rot += 10.0 * dt;
         anim_time += dt;
+
+        bsp_renderer.update(anim_time, &light_layers, &bsp_data, &bsp_textures, &bsp_lightmap, VEC3_ZERO);
 
         unsafe { gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT) };
 
