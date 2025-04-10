@@ -135,6 +135,7 @@ dependencies = [
  "hecs",
  "ktx",
  "lazy_static",
+ "rect_packer",
  "regex",
  "sdl2",
 ]
@@ -162,6 +163,12 @@ checksum = "1885c039570dc00dcb4ff087a89e185fd56bae234ddc7f056a945bf36467248d"
 dependencies = [
  "proc-macro2",
 ]
+
+[[package]]
+name = "rect_packer"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8ffb4dfda4b01cc420847665dc480760d596ce186f2772a66ed32fe9acb1c45"
 
 [[package]]
 name = "regex"

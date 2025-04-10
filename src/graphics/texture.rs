@@ -74,6 +74,19 @@ impl Texture {
         }
     }
 
+    pub fn set_texture_data_region<T>(self: &mut Self, level: i32, x: i32, y: i32, w: i32, h: i32, data: &[T]) {
+        unsafe {
+            gl::BindTexture(gl::TEXTURE_2D, self.handle);
+
+            if self.is_compressed {
+                panic!("Can't set region of compressed texture")
+            }
+            else {
+                gl_checked!{ gl::TexSubImage2D(gl::TEXTURE_2D, level, x, y, w, h, self.gl_fmt, self.gl_type, data.as_ptr() as *const _) }
+            }
+        }
+    }
+
     pub fn width(self: &Self) -> i32 {
         self.w
     }

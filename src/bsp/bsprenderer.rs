@@ -3,7 +3,7 @@ use std::{mem::offset_of, sync::Arc};
 use gamemath::Mat4;
 use lazy_static::lazy_static;
 use crate::{asset_loader::load_texture, gl_checked, graphics::{buffer::Buffer, shader::Shader, texture::{Texture, TextureFormat}}, misc::{vec2_div, vec2_mul, Color32, Vector2, Vector3, Vector4, VEC2_ZERO}};
-use super::{bspcommon::coord_space_transform, bspfile::{BspFile, Edge, SURF_NODRAW, SURF_SKY, SURF_TRANS33, SURF_TRANS66}};
+use super::{bspcommon::coord_space_transform, bspfile::{BspFile, Edge, SURF_NODRAW, SURF_SKY, SURF_TRANS33, SURF_TRANS66}, bsplightmap::BspLightmap};
 
 pub const NUM_CUSTOM_LIGHT_LAYERS: usize = 30;
 pub const CUSTOM_LIGHT_LAYER_START: usize = 32;
@@ -34,9 +34,10 @@ varying mediump vec2 vtx_texcoord1;
 varying mediump vec4 vtx_color;
 
 uniform sampler2D mainTexture;
+uniform sampler2D lightmapTexture;
 
 void main() {
-    gl_FragColor = texture2D(mainTexture, vtx_texcoord0) * vtx_color;
+    gl_FragColor = texture2D(mainTexture, vtx_texcoord0) * texture2D(lightmapTexture, vtx_texcoord1) * vtx_color * 2.0;
 }"#;
 
 lazy_static! {
@@ -67,7 +68,7 @@ fn make_light_table(data: &[u8]) -> Vec<f32> {
     output
 }
 
-fn unpack_face(bsp: &BspFile, textures: &BspMapTextures, face_idx: usize, edge_buffer: &mut Vec<Edge>, geo: &mut Vec<MapVertex>, index: &mut Vec<u16>) {
+fn unpack_face(bsp: &BspFile, textures: &BspMapTextures, face_idx: usize, edge_buffer: &mut Vec<Edge>, geo: &mut Vec<MapVertex>, index: &mut Vec<u16>, lm: &BspLightmap) {
     let face = &bsp.face_lump.faces[face_idx];
     let tex_idx = face.texture_info as usize;
     let tex_info = &bsp.tex_info_lump.textures[tex_idx];
@@ -110,7 +111,7 @@ fn unpack_face(bsp: &BspFile, textures: &BspMapTextures, face_idx: usize, edge_b
     let mut tex_min = Vector2::new(f32::INFINITY, f32::INFINITY);
     let mut tex_max = Vector2::new(f32::NEG_INFINITY, f32::NEG_INFINITY);
 
-    // calculate lightmap UVs
+    // calculate UVs
     for i in 0..edge_buffer.len() {
         let e = &edge_buffer[i];
 
@@ -138,34 +139,15 @@ fn unpack_face(bsp: &BspFile, textures: &BspMapTextures, face_idx: usize, edge_b
         tex_max.y = tex_max.y.max(tex_b.y);
     }
 
-    //let lm_size_x = ((tex_max.x / 16.0).ceil() - (tex_min.x / 16.0).floor() + 1.0).trunc() as usize;
-    //let lm_size_y = ((tex_max.y / 16.0).ceil() - (tex_min.y / 16.0).floor() + 1.0).trunc() as usize;
+    let lm_regions = lm.results[face_idx];
+    let mut lm_region_offsets = [VEC2_ZERO;4];
+    let mut lm_region_scales = [VEC2_ZERO;4];
 
-    //let lm_size_x = lm_size_x.clamp(1, 16);
-    //let lm_size_y = lm_size_y.clamp(1, 16);
-
-    // upload region to lightmap atlas
-    let (lm_region_offset, lm_region_scale) = /*if tex_info.flags & SURF_NOLM == 0 {
-        let (in_cache, lm_region) = lm.pack(face_idx, lm_size_x, lm_size_y, face.num_lightmaps > 1);
-
-        if !in_cache {
-            let slice_start = (face.lightmap_offset / 3) as usize;
-            let slice_end = slice_start + (lm_size_x * lm_size_y);
-            let lm_slice = &bsp.lm_lump.lm[slice_start..slice_end];
-    
-            lm.lm.set_texture_data_region(0, Some(lm_region), lm_slice);
-        }
-
-        // hack: scale lightmap UVs inwards to avoid bilinear sampling artifacts on borders
-        // todo: should probably be padding these instead
-        let lm_region_offset = Vector2::new((lm_region.x as f32 + 0.5) / lm.lm.width as f32, (lm_region.y as f32 + 0.5) / lm.lm.height as f32);
-        let lm_region_scale = Vector2::new((lm_region.width as f32 - 1.0) / lm.lm.width as f32, (lm_region.height as f32 - 1.0) / lm.lm.height as f32);
-
-        (lm_region_offset, lm_region_scale)
+    // NOTE: half texel bias applied to edges to fix bilinear sampling artifacts
+    for i in 0..4 {
+        lm_region_offsets[i] = Vector2::new((lm_regions[i].x as f32 + 0.5) / lm.texture.width() as f32, (lm_regions[i].y as f32 + 0.5) / lm.texture.height() as f32);
+        lm_region_scales[i] = Vector2::new((lm_regions[i].width as f32 - 1.0) / lm.texture.width() as f32, (lm_regions[i].height as f32 - 1.0) / lm.texture.height() as f32);
     }
-    else*/ {
-        (VEC2_ZERO, VEC2_ZERO)
-    };
 
     // build triangle fan out of edges (note: clockwise winding)
     let idx_start = geo.len();
@@ -179,7 +161,10 @@ fn unpack_face(bsp: &BspFile, textures: &BspMapTextures, face_idx: usize, edge_b
             pos.dot(tex_info.v_axis) + tex_info.v_offset
         );
 
-        let lm = vec2_mul(vec2_div(tex - tex_min, tex_max - tex_min), lm_region_scale) + lm_region_offset;
+        let mut lm_uvs = [VEC2_ZERO;4];
+        for i in 0..4 {
+            lm_uvs[i] = vec2_mul(vec2_div(tex - tex_min, tex_max - tex_min), lm_region_scales[i]) + lm_region_offsets[i];
+        }
 
         match &textures.loaded_textures[tex_idx] {
             Some(v) => {
@@ -194,7 +179,7 @@ fn unpack_face(bsp: &BspFile, textures: &BspMapTextures, face_idx: usize, edge_b
 
         let pos = Vector4::new(pos.x, pos.y, pos.z, 1.0);
 
-        let vtx = MapVertex::new(pos, tex, lm, col);
+        let vtx = MapVertex::new(pos, tex, lm_uvs[0], col);
 
         geo.push(vtx);
     }
@@ -245,6 +230,18 @@ fn bind_texture(textures: &BspMapTextures, index: usize) {
     }
 }
 
+fn bind_lightmap(lm: &BspLightmap) {
+    unsafe {
+        gl::ActiveTexture(gl::TEXTURE1);
+
+        gl_checked!{ gl::BindTexture(gl::TEXTURE_2D, lm.texture.handle()) }
+        gl_checked!{ gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32) }
+        gl_checked!{ gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32) }
+        gl_checked!{ gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as i32) }
+        gl_checked!{ gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as i32) }
+    }
+}
+
 fn draw_opaque_geom_setup(shader: &Shader, model: Mat4, view: Mat4, proj: Mat4) {
     let mvp = model * view * coord_space_transform() * proj;
 
@@ -263,6 +260,7 @@ fn draw_opaque_geom_setup(shader: &Shader, model: Mat4, view: Mat4, proj: Mat4) 
     shader.set_active();
     shader.set_uniform_mat4("mvp", mvp);
     shader.set_uniform_int("mainTexture", 0);
+    shader.set_uniform_int("lightmapTexture", 1);
 }
 
 fn draw_transparent_geom_setup(shader: &Shader, model: Mat4, view: Mat4, proj: Mat4) {
@@ -285,6 +283,7 @@ fn draw_transparent_geom_setup(shader: &Shader, model: Mat4, view: Mat4, proj: M
     shader.set_active();
     shader.set_uniform_mat4("mvp", mvp);
     shader.set_uniform_int("mainTexture", 0);
+    shader.set_uniform_int("lightmapTexture", 1);
 }
 
 #[derive(Clone, Copy)]
@@ -433,7 +432,7 @@ impl BspMapRenderer {
     }
 
     /// Call each frame before rendering. Recalculates visible leaves & rebuilds geometry when necessary
-    pub fn update(self: &mut Self, _anim_time: f32, _light_layers: &[f32;NUM_CUSTOM_LIGHT_LAYERS], bsp: &BspFile, textures: &BspMapTextures, position: Vector3) {
+    pub fn update(self: &mut Self, _anim_time: f32, _light_layers: &[f32;NUM_CUSTOM_LIGHT_LAYERS], bsp: &BspFile, textures: &BspMapTextures, lm: &BspLightmap, position: Vector3) {
         let leaf_index = bsp.calc_leaf_index(&position);
         let leaf = &bsp.leaf_lump.leaves[leaf_index as usize];
 
@@ -484,7 +483,7 @@ impl BspMapRenderer {
 
                     let face = &bsp.face_lump.faces[face_idx];
                     let tex_idx = face.texture_info as usize;
-                    unpack_face(bsp, textures, face_idx, &mut edges, &mut self.mesh_vertices[tex_idx], &mut self.mesh_indices[tex_idx]);
+                    unpack_face(bsp, textures, face_idx, &mut edges, &mut self.mesh_vertices[tex_idx], &mut self.mesh_indices[tex_idx], lm);
                 }
             }
         }
@@ -509,8 +508,9 @@ impl BspMapRenderer {
         }
     }
 
-    pub fn draw_opaque(self: &mut Self, _bsp: &BspFile, textures: &BspMapTextures, _animation_time: f32, camera_view: Mat4, camera_proj: Mat4) {
+    pub fn draw_opaque(self: &mut Self, _bsp: &BspFile, textures: &BspMapTextures, lm: &BspLightmap, _animation_time: f32, camera_view: Mat4, camera_proj: Mat4) {
         draw_opaque_geom_setup(&self.map_shader, Mat4::identity(), camera_view, camera_proj);
+        bind_lightmap(lm);
 
         for i in &textures.opaque_meshes {
             if self.mesh_indices[*i].len() > 0 {
@@ -532,8 +532,9 @@ impl BspMapRenderer {
         }
     }
 
-    pub fn draw_transparent(self: &mut Self, _bsp: &BspFile, textures: &BspMapTextures, _animation_time: f32, camera_view: Mat4, camera_proj: Mat4) {
+    pub fn draw_transparent(self: &mut Self, _bsp: &BspFile, textures: &BspMapTextures, lm: &BspLightmap, _animation_time: f32, camera_view: Mat4, camera_proj: Mat4) {
         draw_transparent_geom_setup(&self.map_shader, Mat4::identity(), camera_view, camera_proj);
+        bind_lightmap(lm);
 
         for i in &textures.transp_meshes {
             if self.mesh_indices[*i].len() > 0 {

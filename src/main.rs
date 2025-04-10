@@ -1,6 +1,6 @@
 use std::{ffi::CStr, fs::File};
 
-use bsp::{bspfile::BspFile, bsprenderer::{BspMapRenderer, BspMapTextures, NUM_CUSTOM_LIGHT_LAYERS}};
+use bsp::{bspfile::BspFile, bsplightmap::BspLightmap, bsprenderer::{BspMapRenderer, BspMapTextures, NUM_CUSTOM_LIGHT_LAYERS}};
 use gamemath::Mat4;
 use graphics::gfx::{create_program, set_uniform_float};
 use misc::{mat4_translation, Vector3, Vector4, VEC3_UNIT_X, VEC3_UNIT_Y, VEC3_UNIT_Z, VEC3_ZERO};
@@ -81,12 +81,16 @@ fn main() {
     let bsp_textures = BspMapTextures::new(&bsp_data);
     println!("BSP TEXTURES LOADED");
 
+    // create lightmap atlas
+    let bsp_lightmap = BspLightmap::new(&bsp_data);
+    println!("BSP LIGHTMAP ATLAS CREATED");
+
     // create map renderer
     let mut bsp_renderer = BspMapRenderer::new(&bsp_data);
     println!("BSP RENDERER INITIALIZED");
 
     let light_layers = [0.0; NUM_CUSTOM_LIGHT_LAYERS];
-    bsp_renderer.update(0.0, &light_layers, &bsp_data, &bsp_textures, VEC3_ZERO);
+    bsp_renderer.update(0.0, &light_layers, &bsp_data, &bsp_textures, &bsp_lightmap, VEC3_ZERO);
 
     let mut prev_tick = sdl_timer.performance_counter();
     let timer_freq = 1.0 / (sdl_timer.performance_frequency() as f64);
@@ -118,7 +122,7 @@ fn main() {
             * mat4_translation(Vector3::new(0.0, 0.0, -100.0))
             * Mat4::rotation(rot.to_radians(), VEC3_UNIT_Z);
         let cam_proj = Mat4::perspective(120.0_f32.to_radians(), aspect, 10.0, 10000.0);
-        bsp_renderer.draw_opaque(&bsp_data, &bsp_textures, 0.0, cam_view, cam_proj);
+        bsp_renderer.draw_opaque(&bsp_data, &bsp_textures, &bsp_lightmap, 0.0, cam_view, cam_proj);
 
         window.gl_swap_window();
     }
