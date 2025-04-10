@@ -50,7 +50,7 @@ fn main() {
     }
 
     let window = sdl_video
-        .window("NanoGame3D", 1280, 720)
+        .window("NanoGame3D", 640, 360)
         .opengl()
         .build()
         .unwrap();
@@ -61,6 +61,8 @@ fn main() {
     let gl_ver = unsafe { CStr::from_ptr(gl::GetString(gl::VERSION) as *const _) }.to_str().unwrap();
     let gl_renderer = unsafe { CStr::from_ptr(gl::GetString(gl::RENDERER) as *const _) }.to_str().unwrap();
     println!("{} (GL: {})", gl_renderer, gl_ver);
+
+    sdl_video.gl_set_swap_interval(1).unwrap();
 
     let program = create_program(VERTEX_SHADER_SOURCE, FRAGMENT_SHADER_SOURCE);
     unsafe { gl::UseProgram(program); }
