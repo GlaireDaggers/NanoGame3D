@@ -51,6 +51,8 @@ impl ResourceLoader<Texture> for TextureLoader {
             Err(_) => return Err(ResourceError::ParseError)
         };
 
+        // TODO: I think eventually I'd like to switch to Basis Universal for textures
+
         // find appropriate texture format
         let tex_fmt = if decoder.gl_type() == gl::UNSIGNED_BYTE && decoder.gl_format() == gl::RGBA {
             TextureFormat::RGBA8888

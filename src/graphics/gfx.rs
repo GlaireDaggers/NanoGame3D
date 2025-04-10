@@ -1,6 +1,62 @@
-use std::{mem::transmute, ptr::null_mut};
+use std::{ffi::CString, mem::transmute, ptr::null_mut};
 use gamemath::Mat4;
 use crate::misc::{Vector2, Vector3, Vector4};
+
+#[cfg(debug_assertions)]
+#[macro_export]
+macro_rules! gl_checked {
+    ( $($x:stmt)+ ) => {
+        while gl::GetError() != gl::NO_ERROR {
+        }
+
+        $(
+            $x
+        )+
+        
+        let err = gl::GetError();
+        if err != gl::NO_ERROR {
+            match err {
+                gl::INVALID_ENUM => {
+                    panic!("INVALID_ENUM");
+                }
+                gl::INVALID_VALUE => {
+                    panic!("INVALID_VALUE");
+                }
+                gl::INVALID_OPERATION => {
+                    panic!("INVALID_OPERATION");
+                }
+                gl::STACK_OVERFLOW => {
+                    panic!("STACK_OVERFLOW");
+                }
+                gl::STACK_UNDERFLOW => {
+                    panic!("STACK_UNDERFLOW");
+                }
+                gl::OUT_OF_MEMORY => {
+                    panic!("OUT_OF_MEMORY");
+                }
+                gl::INVALID_FRAMEBUFFER_OPERATION => {
+                    panic!("INVALID_FRAMEBUFFER_OPERATION");
+                }
+                gl::CONTEXT_LOST => {
+                    panic!("CONTEXT_LOST");
+                }
+                _ => {
+                    panic!("Unknown error");
+                }
+            }
+        }
+    };
+}
+
+#[cfg(not(debug_assertions))]
+#[macro_export]
+macro_rules! gl_checked {
+    ( $($x:stmt)+ ) => {
+        $(
+            $x
+        )+
+    };
+}
 
 pub const GL_COMPRESSED_RGB_S3TC_DXT1_EXT: u32 = 0x83F0;
 pub const GL_COMPRESSED_RGBA_S3TC_DXT1_EXT: u32 = 0x83F1;
@@ -72,37 +128,57 @@ pub fn create_program(vtx_shader_src: &str, frag_shader_src: &str) -> u32 {
     }
 }
 
+pub fn get_attrib_location(program: u32, name: &str) -> i32 {
+    unsafe {
+        let name_cstr = CString::new(name).unwrap();
+        gl::GetAttribLocation(program, name_cstr.as_ptr())
+    }
+}
+
+pub fn set_uniform_int(program: u32, name: &str, value: i32) {
+    unsafe {
+        let name_cstr = CString::new(name).unwrap();
+        let uniform_location = gl::GetUniformLocation(program, name_cstr.as_ptr());
+        gl::Uniform1i(uniform_location, value);
+    }
+}
+
 pub fn set_uniform_float(program: u32, name: &str, value: f32) {
     unsafe {
-        let uniform_location = gl::GetUniformLocation(program, name.as_ptr() as *const i8);
+        let name_cstr = CString::new(name).unwrap();
+        let uniform_location = gl::GetUniformLocation(program, name_cstr.as_ptr());
         gl::Uniform1f(uniform_location, value);
     }
 }
 
 pub fn set_uniform_vec2(program: u32, name: &str, value: Vector2) {
     unsafe {
-        let uniform_location = gl::GetUniformLocation(program, name.as_ptr() as *const i8);
+        let name_cstr = CString::new(name).unwrap();
+        let uniform_location = gl::GetUniformLocation(program, name_cstr.as_ptr());
         gl::Uniform2f(uniform_location, value.x, value.y);
     }
 }
 
 pub fn set_uniform_vec3(program: u32, name: &str, value: Vector3) {
     unsafe {
-        let uniform_location = gl::GetUniformLocation(program, name.as_ptr() as *const i8);
+        let name_cstr = CString::new(name).unwrap();
+        let uniform_location = gl::GetUniformLocation(program, name_cstr.as_ptr());
         gl::Uniform3f(uniform_location, value.x, value.y, value.z);
     }
 }
 
 pub fn set_uniform_vec4(program: u32, name: &str, value: Vector4) {
     unsafe {
-        let uniform_location = gl::GetUniformLocation(program, name.as_ptr() as *const i8);
+        let name_cstr = CString::new(name).unwrap();
+        let uniform_location = gl::GetUniformLocation(program, name_cstr.as_ptr());
         gl::Uniform4f(uniform_location, value.x, value.y, value.z, value.w);
     }
 }
 
 pub fn set_uniform_mat4(program: u32, name: &str, value: Mat4) {
     unsafe {
-        let uniform_location = gl::GetUniformLocation(program, name.as_ptr() as *const i8);
+        let name_cstr = CString::new(name).unwrap();
+        let uniform_location = gl::GetUniformLocation(program, name_cstr.as_ptr());
         gl::UniformMatrix4fv(uniform_location, 1, 0, value.rows.as_ptr() as *const f32);
     }
 }

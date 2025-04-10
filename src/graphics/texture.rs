@@ -1,5 +1,7 @@
 use std::ptr::null;
 
+use crate::gl_checked;
+
 use super::gfx::{GL_COMPRESSED_RGBA_S3TC_DXT1_EXT, GL_COMPRESSED_RGBA_S3TC_DXT3_EXT, GL_COMPRESSED_RGB_S3TC_DXT1_EXT};
 
 #[derive(Clone, Copy, Debug)]
@@ -48,7 +50,7 @@ impl Texture {
                 gl::BindTexture(gl::TEXTURE_2D, handle);
 
                 for i in 0..levels {
-                    gl::TexImage2D(gl::TEXTURE_2D, i, gl_internal_fmt as i32, w >> i, h >> i, 0, gl_fmt, gl_type, null());
+                    gl_checked!{ gl::TexImage2D(gl::TEXTURE_2D, i, gl_internal_fmt as i32, w >> i, h >> i, 0, gl_fmt, gl_type, null()) }
                 }
             }
         }
@@ -64,28 +66,32 @@ impl Texture {
 
             if self.is_compressed {
                 let data_size = data.len() * size_of::<T>();
-                gl::CompressedTexImage2D(gl::TEXTURE_2D, level, self.gl_internal_fmt, self.w >> level, self.h >> level, 0, data_size as i32, data.as_ptr() as *const _);
+                gl_checked!{ gl::CompressedTexImage2D(gl::TEXTURE_2D, level, self.gl_internal_fmt, self.w >> level, self.h >> level, 0, data_size as i32, data.as_ptr() as *const _) }
             }
             else {
-                gl::TexSubImage2D(gl::TEXTURE_2D, level, 0, 0, self.w >> level, self.h >> level, self.gl_fmt, self.gl_type, data.as_ptr() as *const _);
+                gl_checked!{ gl::TexSubImage2D(gl::TEXTURE_2D, level, 0, 0, self.w >> level, self.h >> level, self.gl_fmt, self.gl_type, data.as_ptr() as *const _) }
             }
         }
     }
 
     pub fn width(self: &Self) -> i32 {
-        return self.w;
+        self.w
     }
 
     pub fn height(self: &Self) -> i32 {
-        return self.w;
+        self.w
     }
     
     pub fn levels(self: &Self) -> i32 {
-        return self.levels;
+        self.levels
     }
     
     pub fn format(self: &Self) -> TextureFormat {
-        return self.fmt;
+        self.fmt
+    }
+
+    pub fn handle(self: &Self) -> u32 {
+        self.handle
     }
 }
 
