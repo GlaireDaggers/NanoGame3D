@@ -69,9 +69,8 @@ pub fn create_shader(shader_type: u32, shader_src: &str) -> u32 {
             panic!("Failed to create shader");
         }
 
-        let str_ptr = shader_src.as_ptr() as *const i8;
         let str_len = shader_src.len() as i32;
-        gl::ShaderSource(shader, 1, &str_ptr, &str_len);
+        gl::ShaderSource(shader, 1, shader_src.as_ptr() as *const _, &str_len);
         gl::CompileShader(shader);
 
         let mut compile_status = 0;
