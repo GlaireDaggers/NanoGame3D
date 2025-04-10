@@ -58,8 +58,8 @@ fn main() {
     let _gl_context = window.gl_create_context().unwrap();
     gl::load_with(|s| sdl_video.gl_get_proc_address(s) as *const _);
 
-    let gl_ver = unsafe { CStr::from_ptr(gl::GetString(gl::VERSION) as *const i8) }.to_str().unwrap();
-    let gl_renderer = unsafe { CStr::from_ptr(gl::GetString(gl::RENDERER) as *const i8) }.to_str().unwrap();
+    let gl_ver = unsafe { CStr::from_ptr(gl::GetString(gl::VERSION) as *const _) }.to_str().unwrap();
+    let gl_renderer = unsafe { CStr::from_ptr(gl::GetString(gl::RENDERER) as *const _) }.to_str().unwrap();
     println!("{} (GL: {})", gl_renderer, gl_ver);
 
     let program = create_program(VERTEX_SHADER_SOURCE, FRAGMENT_SHADER_SOURCE);
