@@ -3,7 +3,7 @@ use std::{mem::offset_of, sync::Arc};
 use gamemath::Mat4;
 use lazy_static::lazy_static;
 use crate::{asset_loader::load_texture, gl_checked, graphics::{buffer::Buffer, shader::Shader, texture::{Texture, TextureFormat}}, misc::{vec2_div, vec2_mul, Color32, Vector2, Vector3, Vector4, VEC2_ZERO, VEC3_ZERO}};
-use super::{bspcommon::coord_space_transform, bspfile::{BspFile, Edge, SURF_NODRAW, SURF_SKY, SURF_TRANS33, SURF_TRANS66}, bsplightmap::BspLightmap};
+use super::{bspcommon::aabb_frustum, bspfile::{BspFile, Edge, SURF_NODRAW, SURF_SKY, SURF_TRANS33, SURF_TRANS66}, bsplightmap::BspLightmap};
 
 pub const NUM_CUSTOM_LIGHT_LAYERS: usize = 30;
 pub const CUSTOM_LIGHT_LAYER_START: usize = 32;
@@ -266,8 +266,8 @@ fn bind_lightmap(lm: &BspLightmap) {
     }
 }
 
-fn draw_opaque_geom_setup(shader: &Shader, model: Mat4, view: Mat4, proj: Mat4) {
-    let mvp = model * view * coord_space_transform() * proj;
+fn draw_opaque_geom_setup(shader: &Shader, model: Mat4, viewproj: Mat4) {
+    let mvp = model * viewproj;
 
     // set up render state
     unsafe {
@@ -287,8 +287,8 @@ fn draw_opaque_geom_setup(shader: &Shader, model: Mat4, view: Mat4, proj: Mat4) 
     shader.set_uniform_int("lightmapTexture", 1);
 }
 
-fn draw_transparent_geom_setup(shader: &Shader, model: Mat4, view: Mat4, proj: Mat4) {
-    let mvp = model * view * coord_space_transform() * proj;
+fn draw_transparent_geom_setup(shader: &Shader, model: Mat4, viewproj: Mat4) {
+    let mvp = model * viewproj;
 
     // set up render state
     unsafe {
@@ -386,7 +386,7 @@ pub struct BspMapRenderer {
     prev_leaf: i32,
     mesh_vertices: Vec<Vec<MapVertex>>,
     mesh_indices: Vec<Vec<u16>>,
-    visible_leaves: Vec<bool>,
+    visible_leaves: Vec<usize>,
     drawn_faces: Vec<bool>,
     vtx_buffers: Vec<Buffer>,
     idx_buffers: Vec<Buffer>,
@@ -429,7 +429,7 @@ impl BspMapRenderer {
 
         BspMapRenderer {
             vis: vec![false;num_clusters],
-            visible_leaves: vec![false;num_leaves],
+            visible_leaves: Vec::with_capacity(num_leaves),
             mesh_vertices: vec![Vec::new();num_textures],
             mesh_indices: vec![Vec::new();num_textures],
             drawn_faces: vec![false;num_faces],
@@ -447,18 +447,18 @@ impl BspMapRenderer {
         }
     }
 
-    fn update_leaf(bsp: &BspFile, leaf_index: usize, visible_clusters: &[bool], visible_leaves: &mut [bool]) {
+    fn update_leaf(bsp: &BspFile, leaf_index: usize, visible_clusters: &[bool], visible_leaves: &mut Vec<usize>) {
         let leaf = &bsp.leaf_lump.leaves[leaf_index];
         if leaf.cluster == u16::MAX {
             return;
         }
 
         if visible_clusters[leaf.cluster as usize] {
-            visible_leaves[leaf_index] = true;
+            visible_leaves.push(leaf_index);
         }
     }
 
-    fn update_recursive(bsp: &BspFile, cur_node: i32, visible_clusters: &[bool], visible_leaves: &mut [bool]) {
+    fn update_recursive(bsp: &BspFile, cur_node: i32, frustum: &[Vector4], visible_clusters: &[bool], visible_leaves: &mut Vec<usize>) {
         if cur_node < 0 {
             Self::update_leaf(bsp, (-cur_node - 1) as usize, visible_clusters, visible_leaves);
             return;
@@ -466,12 +466,16 @@ impl BspMapRenderer {
 
         let node = &bsp.node_lump.nodes[cur_node as usize];
 
-        Self::update_recursive(bsp, node.front_child, visible_clusters, visible_leaves);
-        Self::update_recursive(bsp, node.back_child, visible_clusters, visible_leaves);
+        if !aabb_frustum(node._bbox_min, node._bbox_max, frustum) {
+            return;
+        }
+
+        Self::update_recursive(bsp, node.front_child, frustum, visible_clusters, visible_leaves);
+        Self::update_recursive(bsp, node.back_child, frustum, visible_clusters, visible_leaves);
     }
 
     /// Call each frame before rendering. Recalculates visible leaves & rebuilds geometry when necessary
-    pub fn update(self: &mut Self, anim_time: f32, _light_layers: &[f32;NUM_CUSTOM_LIGHT_LAYERS], bsp: &BspFile, textures: &BspMapTextures, lm: &BspLightmap, position: Vector3) {
+    pub fn update(self: &mut Self, frustum: &[Vector4], anim_time: f32, light_layers: &[f32;NUM_CUSTOM_LIGHT_LAYERS], bsp: &BspFile, textures: &BspMapTextures, lm: &BspLightmap, position: Vector3) {
         let leaf_index = bsp.calc_leaf_index(&position);
         let leaf = &bsp.leaf_lump.leaves[leaf_index as usize];
 
@@ -482,7 +486,10 @@ impl BspMapRenderer {
             light_styles[idx] = tbl[lightstyle_frame % tbl.len()];
         }
 
-        // only rebuild geometry when we enter a new leaf
+        for (idx, sc) in light_layers.iter().enumerate() {
+            light_styles[idx + CUSTOM_LIGHT_LAYER_START] = *sc;
+        }
+
         if leaf_index != self.prev_leaf {
              // unpack new cluster's visibility info
             self.prev_leaf = leaf_index;
@@ -491,10 +498,10 @@ impl BspMapRenderer {
             if leaf.cluster != u16::MAX {
                 bsp.vis_lump.unpack_vis(leaf.cluster as usize, &mut self.vis);
             }
-
-            self.visible_leaves.fill(false);
-            Self::update_recursive(bsp, 0, &self.vis, &mut self.visible_leaves);
         }
+
+        self.visible_leaves.clear();
+        Self::update_recursive(bsp, 0, frustum, &self.vis, &mut self.visible_leaves);
 
         // build geometry for visible leaves
         for m in &mut self.mesh_vertices {
@@ -510,25 +517,23 @@ impl BspMapRenderer {
         // faces might be shared by multiple leaves. keep track of them so we don't draw them more than once
         self.drawn_faces.fill(false);
 
-        for i in 0..self.visible_leaves.len() {
-            if self.visible_leaves[i] {
-                let leaf = &bsp.leaf_lump.leaves[i];
-                let start_face_idx = leaf.first_leaf_face as usize;
-                let end_face_idx: usize = start_face_idx + (leaf.num_leaf_faces as usize);
+        for i in &self.visible_leaves {
+            let leaf = &bsp.leaf_lump.leaves[*i];
+            let start_face_idx = leaf.first_leaf_face as usize;
+            let end_face_idx: usize = start_face_idx + (leaf.num_leaf_faces as usize);
 
-                for leaf_face in start_face_idx..end_face_idx {
-                    let face_idx = bsp.leaf_face_lump.faces[leaf_face] as usize;
+            for leaf_face in start_face_idx..end_face_idx {
+                let face_idx = bsp.leaf_face_lump.faces[leaf_face] as usize;
 
-                    if self.drawn_faces[face_idx] {
-                        continue;
-                    }
-
-                    self.drawn_faces[face_idx] = true;
-
-                    let face = &bsp.face_lump.faces[face_idx];
-                    let tex_idx = face.texture_info as usize;
-                    unpack_face(bsp, textures, &light_styles, face_idx, &mut edges, &mut self.mesh_vertices[tex_idx], &mut self.mesh_indices[tex_idx], lm);
+                if self.drawn_faces[face_idx] {
+                    continue;
                 }
+
+                self.drawn_faces[face_idx] = true;
+
+                let face = &bsp.face_lump.faces[face_idx];
+                let tex_idx = face.texture_info as usize;
+                unpack_face(bsp, textures, &light_styles, face_idx, &mut edges, &mut self.mesh_vertices[tex_idx], &mut self.mesh_indices[tex_idx], lm);
             }
         }
 
@@ -552,8 +557,8 @@ impl BspMapRenderer {
         }
     }
 
-    pub fn draw_opaque(self: &mut Self, _bsp: &BspFile, textures: &BspMapTextures, lm: &BspLightmap, _animation_time: f32, camera_view: Mat4, camera_proj: Mat4) {
-        draw_opaque_geom_setup(&self.map_shader, Mat4::identity(), camera_view, camera_proj);
+    pub fn draw_opaque(self: &mut Self, _bsp: &BspFile, textures: &BspMapTextures, lm: &BspLightmap, _animation_time: f32, camera_viewproj: Mat4) {
+        draw_opaque_geom_setup(&self.map_shader, Mat4::identity(), camera_viewproj);
         bind_lightmap(lm);
 
         for i in &textures.opaque_meshes {
@@ -576,8 +581,8 @@ impl BspMapRenderer {
         }
     }
 
-    pub fn draw_transparent(self: &mut Self, _bsp: &BspFile, textures: &BspMapTextures, lm: &BspLightmap, _animation_time: f32, camera_view: Mat4, camera_proj: Mat4) {
-        draw_transparent_geom_setup(&self.map_shader, Mat4::identity(), camera_view, camera_proj);
+    pub fn draw_transparent(self: &mut Self, _bsp: &BspFile, textures: &BspMapTextures, lm: &BspLightmap, _animation_time: f32, camera_viewproj: Mat4) {
+        draw_transparent_geom_setup(&self.map_shader, Mat4::identity(), camera_viewproj);
         bind_lightmap(lm);
 
         for i in &textures.transp_meshes {

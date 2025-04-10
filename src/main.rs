@@ -1,6 +1,6 @@
 use std::{ffi::CStr, fs::File};
 
-use bsp::{bspfile::BspFile, bsplightmap::BspLightmap, bsprenderer::{BspMapRenderer, BspMapTextures, NUM_CUSTOM_LIGHT_LAYERS}};
+use bsp::{bspcommon::{coord_space_transform, extract_frustum}, bspfile::BspFile, bsplightmap::BspLightmap, bsprenderer::{BspMapRenderer, BspMapTextures, NUM_CUSTOM_LIGHT_LAYERS}};
 use gamemath::Mat4;
 use graphics::gfx::{create_program, set_uniform_float};
 use misc::{mat4_translation, Vector3, VEC3_UNIT_Z, VEC3_ZERO};
@@ -117,15 +117,18 @@ fn main() {
         rot += 10.0 * dt;
         anim_time += dt;
 
-        bsp_renderer.update(anim_time, &light_layers, &bsp_data, &bsp_textures, &bsp_lightmap, VEC3_ZERO);
-
-        unsafe { gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT) };
-
         let cam_view = Mat4::identity()
             * mat4_translation(Vector3::new(0.0, 0.0, -100.0))
             * Mat4::rotation(rot.to_radians(), VEC3_UNIT_Z);
         let cam_proj = Mat4::perspective(120.0_f32.to_radians(), aspect, 10.0, 10000.0);
-        bsp_renderer.draw_opaque(&bsp_data, &bsp_textures, &bsp_lightmap, anim_time, cam_view, cam_proj);
+        
+        let cam_viewproj = cam_view * coord_space_transform() * cam_proj;
+        let cam_frustum = extract_frustum(&cam_viewproj);
+
+        bsp_renderer.update(&cam_frustum, anim_time, &light_layers, &bsp_data, &bsp_textures, &bsp_lightmap, VEC3_ZERO);
+
+        unsafe { gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT) };
+        bsp_renderer.draw_opaque(&bsp_data, &bsp_textures, &bsp_lightmap, anim_time, cam_viewproj);
 
         window.gl_swap_window();
     }

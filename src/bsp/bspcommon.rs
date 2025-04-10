@@ -28,10 +28,10 @@ pub fn aabb_aabb_intersects(min_a: Vector3, max_a: Vector3, min_b: Vector3, max_
 }
 
 pub fn extract_frustum(viewproj: &Mat4) -> [Vector4;6] {
-    let row1 = Vector4::new(viewproj[0][0], viewproj[1][0], viewproj[2][0], viewproj[3][0]);
-    let row2 = Vector4::new(viewproj[0][1], viewproj[1][1], viewproj[2][1], viewproj[3][1]);
-    let row3 = Vector4::new(viewproj[0][2], viewproj[1][2], viewproj[2][2], viewproj[3][2]);
-    let row4 = Vector4::new(viewproj[0][3], viewproj[1][3], viewproj[2][3], viewproj[3][3]);
+    let row1 = viewproj[0];
+    let row2 = viewproj[1];
+    let row3 = viewproj[2];
+    let row4 = viewproj[3];
 
     [
         row4 + row1,
