@@ -1,8 +1,8 @@
-use std::{mem::offset_of, sync::Arc};
+use std::{collections::HashSet, mem::offset_of, sync::Arc};
 
 use lazy_static::lazy_static;
 use crate::{asset_loader::load_texture, gl_checked, graphics::{buffer::Buffer, shader::Shader, texture::{Texture, TextureFormat}}, math::{Matrix4x4, Vector2, Vector3, Vector4}, misc::Color32};
-use super::{bspcommon::aabb_frustum, bspfile::{BspFile, Edge, SURF_NODRAW, SURF_SKY, SURF_TRANS33, SURF_TRANS66}, bsplightmap::BspLightmap};
+use super::{bspcommon::{aabb_aabb_intersects, aabb_frustum}, bspfile::{BspFile, Edge, SURF_NODRAW, SURF_SKY, SURF_TRANS33, SURF_TRANS66}, bsplightmap::BspLightmap};
 
 pub const NUM_CUSTOM_LIGHT_LAYERS: usize = 30;
 pub const CUSTOM_LIGHT_LAYER_START: usize = 32;
@@ -53,7 +53,7 @@ void main() {
         (texture2D(lightmapTexture, vtx_lm1.xy) * vtx_lm1.z) +
         (texture2D(lightmapTexture, vtx_lm2.xy) * vtx_lm2.z) +
         (texture2D(lightmapTexture, vtx_lm3.xy) * vtx_lm3.z);
-    gl_FragColor = texture2D(mainTexture, vtx_uv) * pow(lm, vec4(1.0 / 2.2)) * vtx_color * 2.0;
+    gl_FragColor = texture2D(mainTexture, vtx_uv) * pow(lm, vec4(1.0 / 2.2)) * vtx_color * vec4(2.0, 2.0, 2.0, 1.0);
 }"#;
 
 lazy_static! {
@@ -380,12 +380,178 @@ impl MapVertex {
     }
 }
 
+struct ModelPart {
+    tex_idx: usize,
+    light_styles: [u8;4],
+    needs_update: bool,
+    idx_len: usize,
+    geom: Vec<MapVertex>,
+    vtx_buffer: Buffer,
+    idx_buffer: Buffer
+}
+
+struct Model {
+    parts: Vec<ModelPart>
+}
+
+pub struct BspMapModelRenderer {
+    models: Vec<Model>,
+    map_shader: Shader,
+    map_shader_position: u32,
+    map_shader_uv: u32,
+    map_shader_lm0: u32,
+    map_shader_lm1: u32,
+    map_shader_lm2: u32,
+    map_shader_lm3: u32,
+    map_shader_color: u32,
+}
+
+impl BspMapModelRenderer {
+    pub fn new(bsp_file: &BspFile, textures: &BspMapTextures, lm: &BspLightmap) -> BspMapModelRenderer {
+        let mut light_styles = [0.0;256];
+        light_styles[0] = LIGHTSTYLES[0][0];
+
+        let mut models = Vec::new();
+        let mut edges = Vec::new();
+        for i in 1..bsp_file.submodel_lump.submodels.len() {
+            let model = &bsp_file.submodel_lump.submodels[i];
+            let mut model_parts = Vec::new();
+
+            let start_face_idx = model.first_face as usize;
+            let end_face_idx: usize = start_face_idx + (model.num_faces as usize);
+
+            for face_idx in start_face_idx..end_face_idx {
+                let mut geom = Vec::new();
+                let mut idx = Vec::new();
+
+                let face = &bsp_file.face_lump.faces[face_idx];
+                let tex_idx = face.texture_info as usize;
+
+                unpack_face(bsp_file, textures, &light_styles, face_idx, &mut edges, &mut geom, &mut idx, lm);
+
+                let mut vtx_buffer = Buffer::new((geom.len() * size_of::<MapVertex>()) as isize);
+                vtx_buffer.set_data(0, &geom);
+
+                let mut idx_buffer = Buffer::new((idx.len() * size_of::<u16>()) as isize);
+                idx_buffer.set_data(0, &idx);
+
+                // optimization: if a face only has a single light style of 0, we don't need to bother updating the vertices for lightmapping
+                let needs_lm_update = face.lightmap_styles[0] == 0 && face.num_lightmaps == 1;
+
+                model_parts.push(ModelPart { tex_idx, light_styles: face.lightmap_styles, geom, vtx_buffer, idx_buffer, idx_len: idx.len(), needs_update: needs_lm_update });
+            }
+
+            models.push(Model {
+                parts: model_parts
+            });
+        }
+
+        let map_shader = Shader::new(MAP_VTX_SHADER, MAP_FRAG_SHADER);
+        let map_shader_position = map_shader.get_attribute_location("in_position");
+        let map_shader_uv = map_shader.get_attribute_location("in_uv");
+        let map_shader_lm0 = map_shader.get_attribute_location("in_lm0");
+        let map_shader_lm1 = map_shader.get_attribute_location("in_lm1");
+        let map_shader_lm2 = map_shader.get_attribute_location("in_lm2");
+        let map_shader_lm3 = map_shader.get_attribute_location("in_lm3");
+        let map_shader_color = map_shader.get_attribute_location("in_color");
+
+        BspMapModelRenderer {
+            models,
+            map_shader,
+            map_shader_position,
+            map_shader_uv,
+            map_shader_lm0,
+            map_shader_lm1,
+            map_shader_lm2,
+            map_shader_lm3,
+            map_shader_color
+        }
+    }
+
+    /// call each frame to update lightmap animation for a given set of visible models
+    pub fn update(self: &mut BspMapModelRenderer, light_layers: &[f32;NUM_CUSTOM_LIGHT_LAYERS], models: &[usize], animation_time: f32) {
+        let lightstyle_frame = (animation_time * 10.0) as usize;
+        let mut light_styles = [0.0;256];
+
+        for (idx, tbl) in LIGHTSTYLES.iter().enumerate() {
+            light_styles[idx] = tbl[lightstyle_frame % tbl.len()];
+        }
+
+        for (idx, sc) in light_layers.iter().enumerate() {
+            light_styles[idx + CUSTOM_LIGHT_LAYER_START] = *sc;
+        }
+
+        for idx in models {
+            for part in &mut self.models[*idx].parts {
+                if part.needs_update {
+                    for vtx in part.geom.iter_mut() {
+                        vtx.lm0.z = light_styles[part.light_styles[0] as usize];
+                        vtx.lm1.z = light_styles[part.light_styles[1] as usize];
+                        vtx.lm2.z = light_styles[part.light_styles[2] as usize];
+                        vtx.lm3.z = light_styles[part.light_styles[3] as usize];
+                    }
+    
+                    part.vtx_buffer.set_data(0, &part.geom);
+                }
+            }
+        }
+    }
+
+    pub fn draw_model_opaque(self: &mut BspMapModelRenderer, bsp: &BspFile, textures: &BspMapTextures, lm: &BspLightmap, model_idx: usize, model_transform: Matrix4x4, camera_viewproj: Matrix4x4) {
+        let model = &self.models[model_idx];
+
+        draw_opaque_geom_setup(&self.map_shader, model_transform, camera_viewproj);
+        bind_lightmap(lm);
+
+        for part in &model.parts {
+            let tex_info = &bsp.tex_info_lump.textures[part.tex_idx];
+            if tex_info.flags & SURF_TRANS33 == 0 && tex_info.flags & SURF_TRANS66 == 0 {
+                unsafe {
+                    bind_texture(textures, part.tex_idx);
+    
+                    gl_checked!{ gl::BindBuffer(gl::ARRAY_BUFFER, part.vtx_buffer.handle()) }
+                    gl_checked!{ gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, part.idx_buffer.handle()) }
+    
+                    setup_vtx_arrays(self.map_shader_position, self.map_shader_uv, self.map_shader_lm0, self.map_shader_lm1, self.map_shader_lm2, self.map_shader_lm3, self.map_shader_color);
+    
+                    // draw geometry
+                    gl_checked!{ gl::DrawElements(gl::TRIANGLES, part.idx_len as i32, gl::UNSIGNED_SHORT, 0 as *const _) }
+                }
+            }
+        }
+    }
+
+    pub fn draw_model_transparent(self: &mut BspMapModelRenderer, bsp: &BspFile, textures: &BspMapTextures, lm: &BspLightmap, model_idx: usize, model_transform: Matrix4x4, camera_viewproj: Matrix4x4) {
+        let model = &self.models[model_idx];
+
+        draw_transparent_geom_setup(&self.map_shader, model_transform, camera_viewproj);
+        bind_lightmap(lm);
+
+        for part in &model.parts {
+            let tex_info = &bsp.tex_info_lump.textures[part.tex_idx];
+            if tex_info.flags & SURF_TRANS33 != 0 || tex_info.flags & SURF_TRANS66 != 0 {
+                unsafe {
+                    bind_texture(textures, part.tex_idx);
+    
+                    gl_checked!{ gl::BindBuffer(gl::ARRAY_BUFFER, part.vtx_buffer.handle()) }
+                    gl_checked!{ gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, part.idx_buffer.handle()) }
+    
+                    setup_vtx_arrays(self.map_shader_position, self.map_shader_uv, self.map_shader_lm0, self.map_shader_lm1, self.map_shader_lm2, self.map_shader_lm3, self.map_shader_color);
+    
+                    // draw geometry
+                    gl_checked!{ gl::DrawElements(gl::TRIANGLES, part.idx_len as i32, gl::UNSIGNED_SHORT, 0 as *const _) }
+                }
+            }
+        }
+    }
+}
+
 pub struct BspMapRenderer {
     vis: Vec<bool>,
     prev_leaf: i32,
     mesh_vertices: Vec<Vec<MapVertex>>,
     mesh_indices: Vec<Vec<u16>>,
-    visible_leaves: Vec<usize>,
+    visible_leaves: HashSet<usize>,
     drawn_faces: Vec<bool>,
     vtx_buffers: Vec<Buffer>,
     idx_buffers: Vec<Buffer>,
@@ -428,7 +594,7 @@ impl BspMapRenderer {
 
         BspMapRenderer {
             vis: vec![false;num_clusters],
-            visible_leaves: Vec::with_capacity(num_leaves),
+            visible_leaves: HashSet::with_capacity(num_leaves),
             mesh_vertices: vec![Vec::new();num_textures],
             mesh_indices: vec![Vec::new();num_textures],
             drawn_faces: vec![false;num_faces],
@@ -446,18 +612,18 @@ impl BspMapRenderer {
         }
     }
 
-    fn update_leaf(bsp: &BspFile, leaf_index: usize, visible_clusters: &[bool], visible_leaves: &mut Vec<usize>) {
+    fn update_leaf(bsp: &BspFile, leaf_index: usize, visible_clusters: &[bool], visible_leaves: &mut HashSet<usize>) {
         let leaf = &bsp.leaf_lump.leaves[leaf_index];
         if leaf.cluster == u16::MAX {
             return;
         }
 
         if visible_clusters[leaf.cluster as usize] {
-            visible_leaves.push(leaf_index);
+            visible_leaves.insert(leaf_index);
         }
     }
 
-    fn update_recursive(bsp: &BspFile, cur_node: i32, frustum: &[Vector4], visible_clusters: &[bool], visible_leaves: &mut Vec<usize>) {
+    fn update_recursive(bsp: &BspFile, cur_node: i32, frustum: &[Vector4], visible_clusters: &[bool], visible_leaves: &mut HashSet<usize>) {
         if cur_node < 0 {
             Self::update_leaf(bsp, (-cur_node - 1) as usize, visible_clusters, visible_leaves);
             return;
@@ -554,6 +720,79 @@ impl BspMapRenderer {
                 self.idx_buffers[i].set_data(0, &self.mesh_indices[i]);
             }
         }
+    }
+
+    fn get_bounds_corners(center: Vector3, extents: Vector3) -> [Vector3;8] {
+        [
+            center + Vector3::new(-extents.x, -extents.y, -extents.z),
+            center + Vector3::new( extents.x, -extents.y, -extents.z),
+            center + Vector3::new(-extents.x,  extents.y, -extents.z),
+            center + Vector3::new( extents.x,  extents.y, -extents.z),
+            center + Vector3::new(-extents.x, -extents.y,  extents.z),
+            center + Vector3::new( extents.x, -extents.y,  extents.z),
+            center + Vector3::new(-extents.x,  extents.y,  extents.z),
+            center + Vector3::new( extents.x,  extents.y,  extents.z),
+        ]
+    }
+
+    fn check_vis_leaf(self: &Self, bsp: &BspFile, leaf_index: usize, center: Vector3, extents: Vector3) -> bool {
+        if !self.visible_leaves.contains(&leaf_index) {
+            return false;
+        }
+
+        let min = center - extents;
+        let max = center + extents;
+
+        let leaf = &bsp.leaf_lump.leaves[leaf_index];
+
+        return aabb_aabb_intersects(min, max, leaf.bbox_min, leaf.bbox_max);
+    }
+
+    fn check_vis_recursive(self: &Self, bsp: &BspFile, node_index: i32, center: Vector3, extents: Vector3, corners: &[Vector3;8]) -> bool {
+        if node_index < 0 {
+            return self.check_vis_leaf(bsp, (-node_index - 1) as usize, center, extents);
+        }
+
+        let node = &bsp.node_lump.nodes[node_index as usize];
+        let split_plane = &bsp.plane_lump.planes[node.plane as usize];
+
+        let mut dmin = f32::MAX;
+        let mut dmax = f32::MIN;
+
+        for i in 0..8 {
+            let d = corners[i].dot(split_plane.normal) - split_plane.distance;
+
+            if d < dmin {
+                dmin = d;
+            }
+
+            if d > dmax {
+                dmax = d;
+            }
+        }
+
+        if dmax >= 0.0 {
+            if self.check_vis_recursive(bsp, node.front_child, center, extents, corners) {
+                return true;
+            }
+        }
+
+        if dmin <= 0.0 {
+            if self.check_vis_recursive(bsp, node.back_child, center, extents, corners) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    pub fn check_vis(self: &Self, bsp: &BspFile, center: Vector3, extents: Vector3) -> bool {
+        let corners = Self::get_bounds_corners(center, extents);
+        return self.check_vis_recursive(bsp, 0, center, extents, &corners);
+    }
+
+    pub fn is_leaf_visible(self: &Self, leaf_index: usize) -> bool {
+        return self.visible_leaves.contains(&leaf_index);
     }
 
     pub fn draw_opaque(self: &mut Self, _bsp: &BspFile, textures: &BspMapTextures, lm: &BspLightmap, _animation_time: f32, camera_viewproj: Matrix4x4) {

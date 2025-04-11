@@ -1,6 +1,6 @@
 use std::{collections::HashMap, ffi::CStr, fs::File};
 
-use bsp::{bspcommon::aabb_aabb_intersects, bspfile::BspFile, bsplightmap::BspLightmap, bsprenderer::{BspMapRenderer, BspMapTextures, NUM_CUSTOM_LIGHT_LAYERS}};
+use bsp::{bspcommon::aabb_aabb_intersects, bspfile::BspFile, bsplightmap::BspLightmap, bsprenderer::{BspMapModelRenderer, BspMapRenderer, BspMapTextures, NUM_CUSTOM_LIGHT_LAYERS}};
 use component::{camera::{Camera, FPCamera}, charactercontroller::CharacterController, door::{Door, DoorLink, DoorOpener}, fpview::FPView, light::Light, mapmodel::MapModel, playerinput::PlayerInput, rotator::Rotator, transform3d::Transform3D, triggerable::{TriggerLink, TriggerState}};
 use hecs::{CommandBuffer, World};
 use math::Vector3;
@@ -37,6 +37,7 @@ pub struct MapData {
     pub map: BspFile,
     pub map_textures: BspMapTextures,
     pub map_lightmap: BspLightmap,
+    pub map_model_renderer: BspMapModelRenderer,
     pub map_renderers: Vec<BspMapRenderer>,
     pub light_layers: [f32;NUM_CUSTOM_LIGHT_LAYERS],
 }
@@ -62,6 +63,7 @@ struct GameState {
 impl MapData {
     pub fn load_map(map_name: &str) -> MapData {
         println!("Loading map: {}", map_name);
+
         let mut bsp_file = File::open(format!("content/maps/{}.bsp", map_name).as_str()).unwrap();
         let bsp = BspFile::new(&mut bsp_file);
         println!("BSP DATA LOADED");
@@ -69,6 +71,9 @@ impl MapData {
         println!("BSP TEXTURES LOADED");
         let bsp_lightmap = BspLightmap::new(&bsp);
         println!("LIGHTMAP ATLAS CREATED");
+        let bsp_map_model_renderer = BspMapModelRenderer::new(&bsp, &bsp_textures, &bsp_lightmap);
+        println!("MAP MODEL RENDERER CREATED");
+
         println!("Map loaded");
 
         MapData {
@@ -76,6 +81,7 @@ impl MapData {
             map_textures: bsp_textures,
             map_renderers: Vec::new(),
             map_lightmap: bsp_lightmap,
+            map_model_renderer: bsp_map_model_renderer,
             light_layers: [0.0;NUM_CUSTOM_LIGHT_LAYERS]
         }
     }
@@ -342,35 +348,27 @@ impl GameState {
         self.time_data.total_time += delta;
 
         // update
-        match &mut self.map_data {
-            Some(v) => {
-                rotator_system_update(&self.time_data, &mut self.world);
-                door_system_update(&self.time_data, v, &mut self.world);
-                trigger_link_system_update(&mut self.world);
-                fpview_input_system_update(&input_state, &self.time_data, &mut self.world);
-                character_init(&mut self.world);
-                character_rotation_update(&mut self.world);
-                character_input_update(&input_state, &mut self.world);
-                fpview_eye_update(&self.time_data, &mut self.world);
-                character_apply_input_update(&self.time_data, v, &mut self.world);
-                character_update(&self.time_data, v, &mut self.world);
-                flycam_system_update(&input_state, &self.time_data, &v.map, &mut self.world);
-                fpcam_update(&mut self.world);
-            }
-            _ => {
-            }
-        };
+        if let Some(map_data) = &mut self.map_data {
+            rotator_system_update(&self.time_data, &mut self.world);
+            door_system_update(&self.time_data, map_data, &mut self.world);
+            trigger_link_system_update(&mut self.world);
+            fpview_input_system_update(&input_state, &self.time_data, &mut self.world);
+            character_init(&mut self.world);
+            character_rotation_update(&mut self.world);
+            character_input_update(&input_state, &mut self.world);
+            fpview_eye_update(&self.time_data, &mut self.world);
+            character_apply_input_update(&self.time_data, map_data, &mut self.world);
+            character_update(&self.time_data, map_data, &mut self.world);
+            flycam_system_update(&input_state, &self.time_data, &map_data.map, &mut self.world);
+            fpcam_update(&mut self.world);
+        }
     }
 
     pub fn render(self: &mut Self, window_data: WindowData) {
         // render
-        match &mut self.map_data {
-            Some(v) => {
-                render_system(&self.time_data, &window_data, v, &mut self.world);
-            }
-            _ => {
-            }
-        };
+        if let Some(map_data) = &mut self.map_data {
+            render_system(&self.time_data, &window_data, map_data, &mut self.world);
+        }
     }
 }
 
