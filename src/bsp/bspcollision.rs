@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use hecs::Entity;
 
-use crate::{bsp::bspfile::MASK_SOLID, misc::{Vector3, VEC3_UNIT_X, VEC3_UNIT_Y, VEC3_UNIT_Z, VEC3_ZERO}};
+use crate::{bsp::bspfile::MASK_SOLID, math::Vector3};
 
 use super::bspfile::BspFile;
 
@@ -20,15 +20,15 @@ pub struct Trace {
 impl BspFile {
     pub fn trace_aabb(aabb_center: &Vector3, aabb_extents: &Vector3, start: &Vector3, end: &Vector3, box_extents: Option<&Vector3>, trace: &mut Trace) -> bool {
         let planes = [
-            (VEC3_UNIT_X,         aabb_center.x + aabb_extents.x),
-            (VEC3_UNIT_X * -1.0,  (aabb_center.x - aabb_extents.x) * -1.0),
-            (VEC3_UNIT_Y,         aabb_center.y + aabb_extents.y),
-            (VEC3_UNIT_Y * -1.0,  (aabb_center.y - aabb_extents.y) * -1.0),
-            (VEC3_UNIT_Z,         aabb_center.z + aabb_extents.z),
-            (VEC3_UNIT_Z * -1.0,  (aabb_center.z - aabb_extents.z) * -1.0),
+            (Vector3::unit_x(),         aabb_center.x + aabb_extents.x),
+            (Vector3::unit_x() * -1.0,  (aabb_center.x - aabb_extents.x) * -1.0),
+            (Vector3::unit_y(),         aabb_center.y + aabb_extents.y),
+            (Vector3::unit_y() * -1.0,  (aabb_center.y - aabb_extents.y) * -1.0),
+            (Vector3::unit_z(),         aabb_center.z + aabb_extents.z),
+            (Vector3::unit_z() * -1.0,  (aabb_center.z - aabb_extents.z) * -1.0),
         ];
 
-        let mut hit_normal = VEC3_ZERO;
+        let mut hit_normal = Vector3::zero();
         let mut enterfrac = f32::MIN;
         let mut exitfrac = 1.0;
         let mut startout = false;
@@ -117,7 +117,7 @@ impl BspFile {
             return;
         }
 
-        let mut hit_normal = VEC3_ZERO;
+        let mut hit_normal = Vector3::zero();
         let mut enterfrac = f32::MIN;
         let mut exitfrac = 1.0;
         let mut startout = false;
@@ -322,8 +322,8 @@ impl BspFile {
             all_solid: false,
             start_solid: false,
             fraction: 1.0,
-            end_pos: VEC3_ZERO,
-            hit_normal: VEC3_ZERO,
+            end_pos: Vector3::zero(),
+            hit_normal: Vector3::zero(),
             entity: None
         };
 
@@ -340,8 +340,8 @@ impl BspFile {
             all_solid: false,
             start_solid: false,
             fraction: 1.0,
-            end_pos: VEC3_ZERO,
-            hit_normal: VEC3_ZERO,
+            end_pos: Vector3::zero(),
+            hit_normal: Vector3::zero(),
             entity: None
         };
 
@@ -365,8 +365,8 @@ impl BspFile {
             all_solid: false,
             start_solid: false,
             fraction: 1.0,
-            end_pos: VEC3_ZERO,
-            hit_normal: VEC3_ZERO,
+            end_pos: Vector3::zero(),
+            hit_normal: Vector3::zero(),
             entity: None
         };
 
@@ -421,15 +421,15 @@ impl BspFile {
         let mut cur_velocity = *velocity;
         let mut remaining_delta = delta;
 
-        let mut planes: [Vector3; NUM_ITERATIONS] = [VEC3_ZERO; NUM_ITERATIONS];
+        let mut planes: [Vector3; NUM_ITERATIONS] = [Vector3::zero(); NUM_ITERATIONS];
         let mut num_planes: usize = 0;
 
         let mut ret_trace = Trace {
             all_solid: false,
             start_solid: false,
             fraction: 1.0,
-            end_pos: VEC3_ZERO,
-            hit_normal: VEC3_ZERO,
+            end_pos: Vector3::zero(),
+            hit_normal: Vector3::zero(),
             entity: None
         };
 

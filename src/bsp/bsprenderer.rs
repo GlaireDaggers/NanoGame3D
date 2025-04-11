@@ -1,8 +1,7 @@
 use std::{mem::offset_of, sync::Arc};
 
-use gamemath::Mat4;
 use lazy_static::lazy_static;
-use crate::{asset_loader::load_texture, gl_checked, graphics::{buffer::Buffer, shader::Shader, texture::{Texture, TextureFormat}}, misc::{vec2_div, vec2_mul, Color32, Vector2, Vector3, Vector4, VEC2_ZERO, VEC3_ZERO}};
+use crate::{asset_loader::load_texture, gl_checked, graphics::{buffer::Buffer, shader::Shader, texture::{Texture, TextureFormat}}, math::{Matrix4x4, Vector2, Vector3, Vector4}, misc::Color32};
 use super::{bspcommon::aabb_frustum, bspfile::{BspFile, Edge, SURF_NODRAW, SURF_SKY, SURF_TRANS33, SURF_TRANS66}, bsplightmap::BspLightmap};
 
 pub const NUM_CUSTOM_LIGHT_LAYERS: usize = 30;
@@ -28,7 +27,7 @@ varying vec4 vtx_color;
 uniform mat4 mvp;
 
 void main() {
-    gl_Position = vec4(in_position.xyz, 1.0) * mvp;
+    gl_Position = mvp * vec4(in_position.xyz, 1.0);
     vtx_uv = in_uv;
     vtx_lm0 = in_lm0;
     vtx_lm1 = in_lm1;
@@ -157,8 +156,8 @@ fn unpack_face(bsp: &BspFile, textures: &BspMapTextures, light_styles: &[f32], f
     }
 
     let lm_regions = lm.results[face_idx];
-    let mut lm_region_offsets = [VEC2_ZERO;4];
-    let mut lm_region_scales = [VEC2_ZERO;4];
+    let mut lm_region_offsets = [Vector2::zero();4];
+    let mut lm_region_scales = [Vector2::zero();4];
 
     // NOTE: half texel bias applied to edges to fix bilinear sampling artifacts
     for i in 0..4 {
@@ -178,20 +177,20 @@ fn unpack_face(bsp: &BspFile, textures: &BspMapTextures, light_styles: &[f32], f
             pos.dot(tex_info.v_axis) + tex_info.v_offset
         );
 
-        let mut lm_uvs = [VEC3_ZERO;4];
+        let mut lm_uvs = [Vector3::zero();4];
         for i in 0..4 {
-            let lm_uv = vec2_mul(vec2_div(tex - tex_min, tex_max - tex_min), lm_region_scales[i]) + lm_region_offsets[i];
+            let lm_uv = ((tex - tex_min) / (tex_max - tex_min) * lm_region_scales[i]) + lm_region_offsets[i];
             lm_uvs[i] = Vector3::new(lm_uv.x, lm_uv.y, light_styles[face.lightmap_styles[i] as usize]);
         }
 
         match &textures.loaded_textures[tex_idx] {
             Some(v) => {
                 let sc = Vector2::new(1.0 / v.width() as f32, 1.0 / v.height() as f32);
-                tex = vec2_mul(tex, sc);
+                tex = tex * sc;
             }
             None => {
                 let sc = Vector2::new(1.0 / 64.0, 1.0 / 64.0);
-                tex = vec2_mul(tex, sc);
+                tex = tex * sc;
             }
         };
 
@@ -266,7 +265,7 @@ fn bind_lightmap(lm: &BspLightmap) {
     }
 }
 
-fn draw_opaque_geom_setup(shader: &Shader, model: Mat4, viewproj: Mat4) {
+fn draw_opaque_geom_setup(shader: &Shader, model: Matrix4x4, viewproj: Matrix4x4) {
     let mvp = model * viewproj;
 
     // set up render state
@@ -287,7 +286,7 @@ fn draw_opaque_geom_setup(shader: &Shader, model: Mat4, viewproj: Mat4) {
     shader.set_uniform_int("lightmapTexture", 1);
 }
 
-fn draw_transparent_geom_setup(shader: &Shader, model: Mat4, viewproj: Mat4) {
+fn draw_transparent_geom_setup(shader: &Shader, model: Matrix4x4, viewproj: Matrix4x4) {
     let mvp = model * viewproj;
 
     // set up render state
@@ -557,8 +556,8 @@ impl BspMapRenderer {
         }
     }
 
-    pub fn draw_opaque(self: &mut Self, _bsp: &BspFile, textures: &BspMapTextures, lm: &BspLightmap, _animation_time: f32, camera_viewproj: Mat4) {
-        draw_opaque_geom_setup(&self.map_shader, Mat4::identity(), camera_viewproj);
+    pub fn draw_opaque(self: &mut Self, _bsp: &BspFile, textures: &BspMapTextures, lm: &BspLightmap, _animation_time: f32, camera_viewproj: Matrix4x4) {
+        draw_opaque_geom_setup(&self.map_shader, Matrix4x4::identity(), camera_viewproj);
         bind_lightmap(lm);
 
         for i in &textures.opaque_meshes {
@@ -581,8 +580,8 @@ impl BspMapRenderer {
         }
     }
 
-    pub fn draw_transparent(self: &mut Self, _bsp: &BspFile, textures: &BspMapTextures, lm: &BspLightmap, _animation_time: f32, camera_viewproj: Mat4) {
-        draw_transparent_geom_setup(&self.map_shader, Mat4::identity(), camera_viewproj);
+    pub fn draw_transparent(self: &mut Self, _bsp: &BspFile, textures: &BspMapTextures, lm: &BspLightmap, _animation_time: f32, camera_viewproj: Matrix4x4) {
+        draw_transparent_geom_setup(&self.map_shader, Matrix4x4::identity(), camera_viewproj);
         bind_lightmap(lm);
 
         for i in &textures.transp_meshes {

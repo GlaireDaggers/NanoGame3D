@@ -1,6 +1,6 @@
 use std::{ffi::CString, mem::transmute, ptr::null_mut};
-use gamemath::Mat4;
-use crate::misc::{Vector2, Vector3, Vector4};
+
+use crate::math::{Matrix4x4, Vector2, Vector3, Vector4};
 
 #[cfg(debug_assertions)]
 #[macro_export]
@@ -215,15 +215,15 @@ pub fn set_uniform_vec4_array(program: u32, name: &str, value: &[Vector4]) {
     }
 }
 
-pub fn set_uniform_mat4(program: u32, name: &str, value: Mat4) {
+pub fn set_uniform_mat4(program: u32, name: &str, value: Matrix4x4) {
     unsafe {
         let name_cstr = CString::new(name).unwrap();
         let uniform_location = gl::GetUniformLocation(program, name_cstr.as_ptr());
-        gl::UniformMatrix4fv(uniform_location, 1, 0, value.rows.as_ptr() as *const _);
+        gl::UniformMatrix4fv(uniform_location, 1, 0, value.m.as_ptr() as *const _);
     }
 }
 
-pub fn set_uniform_mat4_array(program: u32, name: &str, value: &[Mat4]) {
+pub fn set_uniform_mat4_array(program: u32, name: &str, value: &[Matrix4x4]) {
     unsafe {
         let name_cstr = CString::new(name).unwrap();
         let uniform_location = gl::GetUniformLocation(program, name_cstr.as_ptr());

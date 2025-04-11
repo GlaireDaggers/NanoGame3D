@@ -1,6 +1,4 @@
-use gamemath::Mat4;
-
-use crate::misc::{Vector2, Vector3, Vector4};
+use crate::math::{Matrix4x4, Vector2, Vector3, Vector4};
 
 use super::gfx::{create_program, get_attrib_location, set_uniform_float, set_uniform_float_array, set_uniform_int, set_uniform_int_array, set_uniform_mat4, set_uniform_mat4_array, set_uniform_vec2, set_uniform_vec2_array, set_uniform_vec3, set_uniform_vec3_array, set_uniform_vec4, set_uniform_vec4_array};
 
@@ -63,11 +61,11 @@ impl Shader {
         set_uniform_vec4_array(self.handle, name, value);
     }
 
-    pub fn set_uniform_mat4(self: &Shader, name: &str, value: Mat4) {
+    pub fn set_uniform_mat4(self: &Shader, name: &str, value: Matrix4x4) {
         set_uniform_mat4(self.handle, name, value);
     }
 
-    pub fn set_uniform_mat4_array(self: &Shader, name: &str, value: &[Mat4]) {
+    pub fn set_uniform_mat4_array(self: &Shader, name: &str, value: &[Matrix4x4]) {
         set_uniform_mat4_array(self.handle, name, value);
     }
 }

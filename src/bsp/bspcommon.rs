@@ -1,8 +1,6 @@
-use gamemath::Mat4;
+use crate::math::{Matrix4x4, Vector3, Vector4};
 
-use crate::misc::{Vector3, Vector4};
-
-pub fn coord_space_transform() -> Mat4 {
+pub fn coord_space_transform() -> Matrix4x4 {
     // Quake coordinate system:
     // +X is right
     // +Y is forwards
@@ -13,11 +11,11 @@ pub fn coord_space_transform() -> Mat4 {
     // +Y is up
     // -Z is forwards
 
-    Mat4 { rows: [
-        Vector4::new(1.0, 0.0, 0.0, 0.0),
-        Vector4::new(0.0, 0.0, 1.0, 0.0),
-        Vector4::new(0.0, 1.0, 0.0, 0.0),
-        Vector4::new(0.0, 0.0, 0.0, 1.0),
+    Matrix4x4 {m: [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
     ]}
 }
 
@@ -27,11 +25,11 @@ pub fn aabb_aabb_intersects(min_a: Vector3, max_a: Vector3, min_b: Vector3, max_
             min_a.z <= max_b.z && max_a.z >= min_b.z;
 }
 
-pub fn extract_frustum(viewproj: &Mat4) -> [Vector4;6] {
-    let row1 = viewproj[0];
-    let row2 = viewproj[1];
-    let row3 = viewproj[2];
-    let row4 = viewproj[3];
+pub fn extract_frustum(viewproj: &Matrix4x4) -> [Vector4;6] {
+    let row1 = Vector4::new(viewproj.m[0][0], viewproj.m[1][0], viewproj.m[2][0], viewproj.m[3][0]);
+    let row2 = Vector4::new(viewproj.m[0][1], viewproj.m[1][1], viewproj.m[2][1], viewproj.m[3][1]);
+    let row3 = Vector4::new(viewproj.m[0][2], viewproj.m[1][2], viewproj.m[2][2], viewproj.m[3][2]);
+    let row4 = Vector4::new(viewproj.m[0][3], viewproj.m[1][3], viewproj.m[2][3], viewproj.m[3][3]);
 
     [
         row4 + row1,
@@ -61,7 +59,7 @@ pub fn aabb_frustum(min: Vector3, max: Vector3, frustum: &[Vector4]) -> bool {
 }
 
 /// Transform an AABB from local space into world space, returning center + extents
-pub fn transform_aabb(offset: Vector3, extents: Vector3, local2world: Mat4) -> (Vector3, Vector3) {
+pub fn transform_aabb(offset: Vector3, extents: Vector3, local2world: Matrix4x4) -> (Vector3, Vector3) {
     // get bounds corners in local space
     let corners = [
         offset + Vector3::new(-extents.x, -extents.y, -extents.z),

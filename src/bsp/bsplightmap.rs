@@ -1,5 +1,5 @@
 use rect_packer::{Packer, Rect};
-use crate::{graphics::texture::{Texture, TextureFormat}, misc::Vector2};
+use crate::{graphics::texture::{Texture, TextureFormat}, math::Vector2};
 
 use super::bspfile::{BspFile, SURF_NOLM};
 

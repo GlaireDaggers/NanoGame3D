@@ -42,12 +42,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
-name = "gamemath"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1132cef9fd20be526eee3766249b0426ae1c041da9c212bfd20fd81e6f3ed58e"
-
-[[package]]
 name = "gl"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -130,7 +124,6 @@ name = "nanogame3d"
 version = "0.1.0"
 dependencies = [
  "byteorder",
- "gamemath",
  "gl",
  "hecs",
  "ktx",

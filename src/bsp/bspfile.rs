@@ -3,7 +3,7 @@ use std::{collections::HashMap, io::Seek};
 use byteorder::{LittleEndian, ReadBytesExt};
 use regex::Regex;
 
-use crate::misc::{Color32, Vector3};
+use crate::{math::Vector3, misc::Color32};
 
 const BSP_MAGIC: u32 = 0x50534249;
 const BSP_VERSION: u32 = 38;
