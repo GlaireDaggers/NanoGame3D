@@ -270,7 +270,7 @@ fn draw_opaque_geom_setup(shader: &Shader, model: Matrix4x4, viewproj: Matrix4x4
 
     // set up render state
     unsafe {
-        gl::FrontFace(gl::CCW);
+        gl::FrontFace(gl::CW);
         gl::CullFace(gl::BACK);
         gl::Enable(gl::CULL_FACE);
         gl::DepthFunc(gl::LEQUAL);
@@ -291,7 +291,7 @@ fn draw_transparent_geom_setup(shader: &Shader, model: Matrix4x4, viewproj: Matr
 
     // set up render state
     unsafe {
-        gl::FrontFace(gl::CCW);
+        gl::FrontFace(gl::CW);
         gl::CullFace(gl::BACK);
         gl::Enable(gl::CULL_FACE);
         gl::DepthFunc(gl::LEQUAL);

@@ -4,7 +4,11 @@ use bsp::{bspcommon::aabb_aabb_intersects, bspfile::BspFile, bsplightmap::BspLig
 use component::{camera::{Camera, FPCamera}, charactercontroller::CharacterController, door::{Door, DoorLink, DoorOpener}, fpview::FPView, light::Light, mapmodel::MapModel, playerinput::PlayerInput, rotator::Rotator, transform3d::Transform3D, triggerable::{TriggerLink, TriggerState}};
 use hecs::{CommandBuffer, World};
 use math::Vector3;
+use sdl2::controller::{Axis, Button, GameController};
 use system::{character_system::{character_apply_input_update, character_init, character_input_update, character_rotation_update, character_update}, door_system::door_system_update, flycam_system::flycam_system_update, fpcam_system::fpcam_update, fpview_system::{fpview_eye_update, fpview_input_system_update}, render_system::render_system, rotator_system::rotator_system_update, triggerable_system::trigger_link_system_update};
+
+const TICK_INTERVAL: f32 = 1.0 / 60.0;
+const MAX_TICK_ACCUM: f32 = TICK_INTERVAL * 4.0;
 
 extern crate sdl2;
 extern crate gl;
@@ -314,21 +318,30 @@ impl GameState {
         }
     }
 
-    pub fn tick(self: &mut Self, delta: f32, window_data: WindowData) {
-        let input_state = InputState {
+    pub fn tick(self: &mut Self, delta: f32, gamepad: Option<&GameController>) {
+        let mut input_state = InputState {
             move_x: 0.0,
             move_y: 0.0,
-            look_x: 0.25,
+            look_x: 0.0,
             look_y: 0.0,
             crouch: false,
             jump: false
         };
 
+        if let Some(gp) = gamepad {
+            input_state.move_x = gp.axis(Axis::LeftX) as f32 / 32767.0;
+            input_state.move_y = gp.axis(Axis::LeftY) as f32 / -32767.0;
+            input_state.look_x = gp.axis(Axis::RightX) as f32 / 32767.0;
+            input_state.look_y = gp.axis(Axis::RightY) as f32 / -32767.0;
+            input_state.jump = gp.button(Button::A);
+            input_state.crouch = gp.button(Button::B);
+        }
+
         // update time
         self.time_data.delta_time = delta;
         self.time_data.total_time += delta;
 
-        // update & render
+        // update
         match &mut self.map_data {
             Some(v) => {
                 rotator_system_update(&self.time_data, &mut self.world);
@@ -343,6 +356,16 @@ impl GameState {
                 character_update(&self.time_data, v, &mut self.world);
                 flycam_system_update(&input_state, &self.time_data, &v.map, &mut self.world);
                 fpcam_update(&mut self.world);
+            }
+            _ => {
+            }
+        };
+    }
+
+    pub fn render(self: &mut Self, window_data: WindowData) {
+        // render
+        match &mut self.map_data {
+            Some(v) => {
                 render_system(&self.time_data, &window_data, v, &mut self.world);
             }
             _ => {
@@ -355,6 +378,7 @@ fn main() {
     let sdl = sdl2::init().unwrap();
     let sdl_video = sdl.video().unwrap();
     let sdl_timer = sdl.timer().unwrap();
+    let sdl_gamecontroller = sdl.game_controller().unwrap();
 
     #[cfg(feature = "gles2")]
     {
@@ -390,12 +414,26 @@ fn main() {
 
     let mut prev_tick = sdl_timer.performance_counter();
     let timer_freq = 1.0 / (sdl_timer.performance_frequency() as f64);
+    let mut delta_accum = 0.0;
+
+    let mut gamepad = None;
 
     let mut event_pump = sdl.event_pump().unwrap();
     'main: loop {
         for event in event_pump.poll_iter() {
             match event {
                 sdl2::event::Event::Quit {..} => break 'main,
+                sdl2::event::Event::ControllerDeviceAdded { timestamp: _, which } => {
+                    match gamepad {
+                        None => {
+                            let new_gamepad = sdl_gamecontroller.open(which).unwrap();
+                            println!("Opened gamepad: {}", new_gamepad.name());
+                            gamepad = Some(new_gamepad);
+                        }
+                        _ => {
+                        }
+                    }
+                }
                 _ => {},
             }
         }
@@ -405,10 +443,20 @@ fn main() {
         let dt = ((diff_tick as f64) * timer_freq) as f32;
         prev_tick = cur_tick;
 
-        let win_size = window.size();
+        delta_accum += dt;
+        if delta_accum > MAX_TICK_ACCUM {
+            delta_accum = MAX_TICK_ACCUM;
+        }
 
-        // update & render
-        game_state.tick(dt, WindowData { width: win_size.0 as i32, height: win_size.1 as i32 });
+        // update
+        while delta_accum >= TICK_INTERVAL {
+            delta_accum -= TICK_INTERVAL;
+            game_state.tick(TICK_INTERVAL, gamepad.as_ref());
+        }
+
+        // render
+        let win_size = window.size();
+        game_state.render(WindowData { width: win_size.0 as i32, height: win_size.1 as i32 });
 
         window.gl_swap_window();
     }
