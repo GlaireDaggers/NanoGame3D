@@ -1,0 +1,2 @@
+*.ktx filter=lfs diff=lfs merge=lfs -text
+*.bsp filter=lfs diff=lfs merge=lfs -text

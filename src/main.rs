@@ -98,7 +98,7 @@ impl GameState {
     pub fn new() -> GameState {
         let mut world = World::new();
 
-        let map_data = MapData::load_map("demo1");
+        let map_data = MapData::load_map("e1m1");
 
         let mut player_start_pos = Vector3::zero();
         let mut player_start_rot = 0.0;
@@ -395,6 +395,7 @@ fn main() {
     let window = sdl_video
         .window("NanoGame3D", 640, 360)
         .opengl()
+        .resizable()
         .build()
         .unwrap();
 
