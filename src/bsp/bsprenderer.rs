@@ -53,7 +53,7 @@ void main() {
         (texture2D(lightmapTexture, vtx_lm1.xy) * vtx_lm1.z) +
         (texture2D(lightmapTexture, vtx_lm2.xy) * vtx_lm2.z) +
         (texture2D(lightmapTexture, vtx_lm3.xy) * vtx_lm3.z);
-    gl_FragColor = texture2D(mainTexture, vtx_uv) * pow(lm, vec4(1.0 / 2.2)) * vtx_color * vec4(2.0, 2.0, 2.0, 1.0);
+    gl_FragColor = texture2D(mainTexture, vtx_uv) * lm * vtx_color * vec4(2.0, 2.0, 2.0, 1.0);
 }"#;
 
 lazy_static! {
