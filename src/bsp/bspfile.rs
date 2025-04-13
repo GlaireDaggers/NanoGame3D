@@ -3,9 +3,10 @@ use std::{collections::HashMap, io::Seek};
 use byteorder::{LittleEndian, ReadBytesExt};
 use regex::Regex;
 
-use crate::{math::Vector3, misc::Color32};
+use crate::{math::{Vector3, Vector4}, misc::Color32};
 
-const BSP_MAGIC: u32 = 0x50534249;
+const BSP_MAGIC: u32 = 0x50534249;  // IBSP
+const BSPX_MAGIC: u32 = 0x58505342; // BSPX
 const BSP_VERSION: u32 = 38;
 
 pub const SURF_LIGHT: u32   = 0x1;
@@ -41,6 +42,14 @@ fn read_vec3s<R: ReadBytesExt>(reader: &mut R) -> Vector3 {
     let x = reader.read_i16::<LittleEndian>().unwrap() as f32;
     let y = reader.read_i16::<LittleEndian>().unwrap() as f32;
     let z = reader.read_i16::<LittleEndian>().unwrap() as f32;
+
+    Vector3::new(x, y, z)
+}
+
+fn read_vec3i<R: ReadBytesExt>(reader: &mut R) -> Vector3 {
+    let x = reader.read_i32::<LittleEndian>().unwrap() as f32;
+    let y = reader.read_i32::<LittleEndian>().unwrap() as f32;
+    let z = reader.read_i32::<LittleEndian>().unwrap() as f32;
 
     Vector3::new(x, y, z)
 }
@@ -201,6 +210,39 @@ pub struct SubModelLump {
 
 pub struct LightmapLump {
     pub lm: Vec<Color32>
+}
+
+#[derive(Clone, Copy)]
+pub struct LSHProbe {
+    pub sh_r: Vector4,
+    pub sh_g: Vector4,
+    pub sh_b: Vector4,
+}
+
+impl LSHProbe {
+    pub fn lerp(self: &Self, b: Self, t: f32) -> Self {
+        LSHProbe {
+            sh_r: (self.sh_r * (1.0 - t)) + (b.sh_r * t),
+            sh_g: (self.sh_g * (1.0 - t)) + (b.sh_g * t),
+            sh_b: (self.sh_b * (1.0 - t)) + (b.sh_b * t)
+        }
+    }
+
+    pub fn sample(self: &Self, direction: Vector3) -> Vector3 {
+        let v = Vector4::new(direction.x, direction.y, direction.z, 1.0);
+        let r = v.dot(self.sh_r);
+        let g = v.dot(self.sh_g);
+        let b = v.dot(self.sh_b);
+
+        Vector3::new(r, g, b)
+    }
+}
+
+pub struct LSHGridLump {
+    pub grid_dist: Vector3,
+    pub grid_size: Vector3,
+    pub grid_mins: Vector3,
+    pub probes: Vec<LSHProbe>
 }
 
 impl EntityLump {
@@ -682,6 +724,97 @@ impl SubModelLump {
     }
 }
 
+impl LSHGridLump {
+    pub fn new<R: Seek + ReadBytesExt>(reader: &mut R, info: &BspLumpInfo) -> LSHGridLump {
+        reader.seek(std::io::SeekFrom::Start(info.offset as u64)).unwrap();
+
+        let grid_dist = read_vec3f(reader);
+        let grid_size = read_vec3i(reader);
+        let grid_mins = read_vec3f(reader);
+
+        let num_x = grid_size.x as i32;
+        let num_y = grid_size.y as i32;
+        let num_z = grid_size.z as i32;
+
+        println!("LSH Grid: {} x {} x {}", num_x, num_y, num_z);
+
+        let num_total = num_x * num_y * num_z;
+        let mut probes = Vec::with_capacity(num_total as usize);
+
+        for _ in 0..num_total {
+            let l0_rgb = read_vec3f(reader);
+            let l1_r = read_vec3f(reader);
+            let l1_g = read_vec3f(reader);
+            let l1_b = read_vec3f(reader);
+
+            probes.push(LSHProbe {
+                sh_r: Vector4::new(l1_r.x, l1_r.y, l1_r.z, l0_rgb.x),
+                sh_g: Vector4::new(l1_g.x, l1_g.y, l1_g.z, l0_rgb.y),
+                sh_b: Vector4::new(l1_b.x, l1_b.y, l1_b.z, l0_rgb.z),
+            });
+        }
+
+        LSHGridLump { grid_dist, grid_size, grid_mins, probes }
+    }
+
+    pub fn sample_position(self: &Self, pos: Vector3) -> LSHProbe {
+        let mut coord = (pos - self.grid_mins) / self.grid_dist;
+        coord.x = coord.x.clamp(0.0, self.grid_size.x - 1.001);
+        coord.y = coord.y.clamp(0.0, self.grid_size.y - 1.001);
+        coord.z = coord.z.clamp(0.0, self.grid_size.z - 1.001);
+
+        // gather a set of 8 samples surrounding the given point & perform trilinear interpolation to arrive at final SH probe
+
+        let sx = self.grid_size.x as i32;
+        let sy = self.grid_size.y as i32;
+
+        let cx1 = coord.x as i32;
+        let cy1 = coord.y as i32;
+        let cz1 = coord.z as i32;
+
+        let cx2 = cx1 + 1;
+        let cy2 = cy1 + 1;
+        let cz2 = cz1 + 1;
+
+        let fracx = coord.x - cx1 as f32;
+        let fracy = coord.y - cy1 as f32;
+        let fracz = coord.z - cz1 as f32;
+
+        let idx000 = cx1 + (cy1 * sx) + (cz1 * sx * sy);
+        let idx100 = cx2 + (cy1 * sx) + (cz1 * sx * sy);
+        let idx010 = cx1 + (cy2 * sx) + (cz1 * sx * sy);
+        let idx110 = cx2 + (cy2 * sx) + (cz1 * sx * sy);
+        let idx001 = cx1 + (cy1 * sx) + (cz2 * sx * sy);
+        let idx101 = cx2 + (cy1 * sx) + (cz2 * sx * sy);
+        let idx011 = cx1 + (cy2 * sx) + (cz2 * sx * sy);
+        let idx111 = cx2 + (cy2 * sx) + (cz2 * sx * sy);
+
+        let sh000 = self.probes[idx000 as usize];
+        let sh100 = self.probes[idx100 as usize];
+        let sh010 = self.probes[idx010 as usize];
+        let sh110 = self.probes[idx110 as usize];
+        let sh001 = self.probes[idx001 as usize];
+        let sh101 = self.probes[idx101 as usize];
+        let sh011 = self.probes[idx011 as usize];
+        let sh111 = self.probes[idx111 as usize];
+
+        // interpolate on X axis
+        let shx00 = sh000.lerp(sh100, fracx);
+        let shx10 = sh010.lerp(sh110, fracx);
+        let shx01 = sh001.lerp(sh101, fracx);
+        let shx11 = sh011.lerp(sh111, fracx);
+
+        // interpolate on Y axis
+        let shxy0 = shx00.lerp(shx10, fracy);
+        let shxy1 = shx01.lerp(shx11, fracy);
+
+        // interpolate on Z axis
+        let shxyz = shxy0.lerp(shxy1, fracz);
+
+        shxyz
+    }
+}
+
 pub struct BspFile {
     pub entity_lump: EntityLump,
     pub vertex_lump: VertexLump,
@@ -699,6 +832,7 @@ pub struct BspFile {
     pub brush_lump: BrushLump,
     pub brush_side_lump: BrushSideLump,
     pub submodel_lump: SubModelLump,
+    pub lsh_grid_lump: LSHGridLump,
 }
 
 impl BspFile {
@@ -716,9 +850,13 @@ impl BspFile {
         // read BSP lump info
         let mut bsp_lumps: Vec<BspLumpInfo> = Vec::with_capacity(19);
 
+        let mut max_offset = 0;
+
         for _ in 0..19 {
             let offset = reader.read_u32::<LittleEndian>().unwrap();
             let length = reader.read_u32::<LittleEndian>().unwrap();
+
+            max_offset = max_offset.max((offset + length) as u64);
 
             bsp_lumps.push(BspLumpInfo { offset, length });
         }
@@ -741,6 +879,41 @@ impl BspFile {
         let brush_lump = BrushLump::new(reader, &bsp_lumps[14]);
         let brush_side_lump = BrushSideLump::new(reader, &bsp_lumps[15]);
 
+        // seek to end of main BSP and look for "BSPX" header
+        let bspx_start = if max_offset % 4 == 0 { max_offset } else { max_offset + (4 - max_offset % 4) };
+        reader.seek(std::io::SeekFrom::Start(bspx_start)).unwrap();
+        let bspx_magic = reader.read_u32::<LittleEndian>().unwrap();
+        if bspx_magic != BSPX_MAGIC {
+            panic!("Failed loading BSP: expected BSPX extension");
+        }
+
+        let num_bspx_lumps = reader.read_u32::<LittleEndian>().unwrap();
+        let mut bspx_lumps = HashMap::new();
+
+        for _ in 0..num_bspx_lumps {
+            let mut lump_name: [u8; 24] = [0; 24];
+            reader.read_exact(&mut lump_name).unwrap();
+
+            let mut name_len = 32;
+            for i in 0..32 {
+                if lump_name[i] == 0 {
+                    name_len = i;
+                    break;
+                }
+            }
+
+            let lump_name = unsafe { std::str::from_utf8_unchecked(&lump_name[0..name_len]) }.to_owned();
+            let lump_offset = reader.read_u32::<LittleEndian>().unwrap();
+            let lump_length = reader.read_u32::<LittleEndian>().unwrap();
+
+            println!("BSPX Lump: {} (offs: {}, len: {})", lump_name, lump_offset, lump_length);
+
+            let lump_info = BspLumpInfo { offset: lump_offset, length: lump_length };
+            bspx_lumps.insert(lump_name, lump_info);
+        }
+
+        let lsh_grid_lump = LSHGridLump::new(reader, &bspx_lumps["LSH_GRID"]);
+
         BspFile {
             entity_lump,
             vertex_lump,
@@ -757,7 +930,8 @@ impl BspFile {
             lm_lump,
             brush_lump,
             brush_side_lump,
-            submodel_lump
+            submodel_lump,
+            lsh_grid_lump
         }
     }
 }

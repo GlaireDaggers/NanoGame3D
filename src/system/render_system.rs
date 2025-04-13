@@ -98,17 +98,17 @@ pub fn render_system(time: &TimeData, window_data: &WindowData, map_data: &mut M
         };*/
 
         // draw opaque map geometry
-        renderer.draw_opaque(&map_data.map, &map_data.map_textures, &map_data.map_lightmap, time.total_time, viewproj);
+        renderer.draw_opaque(&map_data.map_textures, &map_data.map_lightmap, time.total_time, viewproj);
 
         for (idx, transform) in visible_model_indices.iter().zip(&visible_model_transforms) {
-            map_data.map_model_renderer.draw_model_opaque(&map_data.map, &map_data.map_textures, &map_data.map_lightmap, *idx, *transform, viewproj);
+            map_data.map_model_renderer.draw_model(false, &map_data.map_textures, &map_data.map_lightmap, *idx, *transform, viewproj);
         }
 
         // draw transparent map geometry
-        renderer.draw_transparent(&map_data.map, &map_data.map_textures, &map_data.map_lightmap, time.total_time, viewproj);
+        renderer.draw_transparent(&map_data.map_textures, &map_data.map_lightmap, time.total_time, viewproj);
 
         for (idx, transform) in visible_model_indices.iter().zip(&visible_model_transforms) {
-            map_data.map_model_renderer.draw_model_transparent(&map_data.map, &map_data.map_textures, &map_data.map_lightmap, *idx, *transform, viewproj);
+            map_data.map_model_renderer.draw_model(true, &map_data.map_textures, &map_data.map_lightmap, *idx, *transform, viewproj);
         }
 
         camera_index += 1;

@@ -1,60 +1,12 @@
 use std::{collections::HashSet, mem::offset_of, sync::Arc};
 
 use lazy_static::lazy_static;
-use crate::{asset_loader::load_texture, gl_checked, graphics::{buffer::Buffer, shader::Shader, texture::{Texture, TextureFormat}}, math::{Matrix4x4, Vector2, Vector3, Vector4}, misc::Color32};
+use crate::{asset_loader::{load_material, load_shader}, gl_checked, graphics::{buffer::Buffer, material::{Material, TextureSampler}, texture::{Texture, TextureFormat}}, math::{Matrix4x4, Vector2, Vector3, Vector4}, misc::Color32};
 use super::{bspcommon::{aabb_aabb_intersects, aabb_frustum}, bspfile::{BspFile, Edge, SURF_NODRAW, SURF_SKY, SURF_TRANS33, SURF_TRANS66}, bsplightmap::BspLightmap};
 
 pub const NUM_CUSTOM_LIGHT_LAYERS: usize = 30;
 pub const CUSTOM_LIGHT_LAYER_START: usize = 32;
 pub const CUSTOM_LIGHT_LAYER_END: usize = CUSTOM_LIGHT_LAYER_START + NUM_CUSTOM_LIGHT_LAYERS;
-
-const MAP_VTX_SHADER: &str = r#"#version 100
-attribute vec4 in_position;
-attribute vec2 in_uv;
-attribute vec3 in_lm0;
-attribute vec3 in_lm1;
-attribute vec3 in_lm2;
-attribute vec3 in_lm3;
-attribute vec4 in_color;
-
-varying vec2 vtx_uv;
-varying vec3 vtx_lm0;
-varying vec3 vtx_lm1;
-varying vec3 vtx_lm2;
-varying vec3 vtx_lm3;
-varying vec4 vtx_color;
-
-uniform mat4 mvp;
-
-void main() {
-    gl_Position = mvp * vec4(in_position.xyz, 1.0);
-    vtx_uv = in_uv;
-    vtx_lm0 = in_lm0;
-    vtx_lm1 = in_lm1;
-    vtx_lm2 = in_lm2;
-    vtx_lm3 = in_lm3;
-    vtx_color = in_color;
-}"#;
-
-const MAP_FRAG_SHADER: &str = r#"#version 100
-varying mediump vec2 vtx_uv;
-varying mediump vec3 vtx_lm0;
-varying mediump vec3 vtx_lm1;
-varying mediump vec3 vtx_lm2;
-varying mediump vec3 vtx_lm3;
-varying mediump vec4 vtx_color;
-
-uniform sampler2D mainTexture;
-uniform sampler2D lightmapTexture;
-
-void main() {
-    mediump vec4 lm = 
-        (texture2D(lightmapTexture, vtx_lm0.xy) * vtx_lm0.z) +
-        (texture2D(lightmapTexture, vtx_lm1.xy) * vtx_lm1.z) +
-        (texture2D(lightmapTexture, vtx_lm2.xy) * vtx_lm2.z) +
-        (texture2D(lightmapTexture, vtx_lm3.xy) * vtx_lm3.z);
-    gl_FragColor = texture2D(mainTexture, vtx_uv) * lm * vtx_color * vec4(2.0, 2.0, 2.0, 1.0);
-}"#;
 
 lazy_static! {
     static ref LIGHTSTYLES: [Vec<f32>;12] = [
@@ -172,7 +124,7 @@ fn unpack_face(bsp: &BspFile, textures: &BspMapTextures, light_styles: &[f32], f
         let pos = edge_buffer[i].a as usize;
         let pos = bsp.vertex_lump.vertices[pos];
 
-        let mut tex = Vector2::new(
+        let tex = Vector2::new(
             pos.dot(tex_info.u_axis) + tex_info.u_offset,
             pos.dot(tex_info.v_axis) + tex_info.v_offset
         );
@@ -183,16 +135,11 @@ fn unpack_face(bsp: &BspFile, textures: &BspMapTextures, light_styles: &[f32], f
             lm_uvs[i] = Vector3::new(lm_uv.x, lm_uv.y, light_styles[face.lightmap_styles[i] as usize]);
         }
 
-        match &textures.loaded_textures[tex_idx] {
-            Some(v) => {
-                let sc = Vector2::new(1.0 / v.width() as f32, 1.0 / v.height() as f32);
-                tex = tex * sc;
-            }
-            None => {
-                let sc = Vector2::new(1.0 / 64.0, 1.0 / 64.0);
-                tex = tex * sc;
-            }
-        };
+        let mat = &textures.loaded_materials[tex_idx];
+        let texture = &mat.texture["mainTexture"].texture;
+
+        let sc = Vector2::new(1.0 / texture.width() as f32, 1.0 / texture.height() as f32);
+        let tex = tex * sc;
 
         let pos = Vector4::new(pos.x, pos.y, pos.z, 1.0);
 
@@ -231,28 +178,6 @@ fn setup_vtx_arrays(position: u32, uv: u32, lm0: u32, lm1: u32, lm2: u32, lm3: u
     }
 }
 
-fn bind_texture(textures: &BspMapTextures, index: usize) {
-    unsafe {
-        gl::ActiveTexture(gl::TEXTURE0);
-
-        match &textures.loaded_textures[index] {
-            Some(v) => {
-                gl_checked!{ gl::BindTexture(gl::TEXTURE_2D, v.handle()) }
-                gl_checked!{ gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32) }
-                gl_checked!{ gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32) }
-            }
-            None => {
-                gl_checked!{ gl::BindTexture(gl::TEXTURE_2D, textures.err_tex.handle()) }
-                gl_checked!{ gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32) }
-                gl_checked!{ gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32) }
-            }
-        };
-
-        gl_checked!{ gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::REPEAT as i32) }
-        gl_checked!{ gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::REPEAT as i32) }
-    }
-}
-
 fn bind_lightmap(lm: &BspLightmap) {
     unsafe {
         gl::ActiveTexture(gl::TEXTURE1);
@@ -265,48 +190,11 @@ fn bind_lightmap(lm: &BspLightmap) {
     }
 }
 
-fn draw_opaque_geom_setup(shader: &Shader, model: Matrix4x4, viewproj: Matrix4x4) {
-    let mvp = model * viewproj;
+fn draw_geom_setup(material: &Material, model: Matrix4x4, viewproj: Matrix4x4) {
+    material.apply();
 
-    // set up render state
-    unsafe {
-        gl::FrontFace(gl::CW);
-        gl::CullFace(gl::BACK);
-        gl::Enable(gl::CULL_FACE);
-        gl::DepthFunc(gl::LEQUAL);
-        gl::Enable(gl::DEPTH_TEST);
-        gl::DepthMask(gl::TRUE);
-        gl::Disable(gl::BLEND);
-    }
-
-    // set up shader
-    shader.set_active();
-    shader.set_uniform_mat4("mvp", mvp);
-    shader.set_uniform_int("mainTexture", 0);
-    shader.set_uniform_int("lightmapTexture", 1);
-}
-
-fn draw_transparent_geom_setup(shader: &Shader, model: Matrix4x4, viewproj: Matrix4x4) {
-    let mvp = model * viewproj;
-
-    // set up render state
-    unsafe {
-        gl::FrontFace(gl::CW);
-        gl::CullFace(gl::BACK);
-        gl::Enable(gl::CULL_FACE);
-        gl::DepthFunc(gl::LEQUAL);
-        gl::Enable(gl::DEPTH_TEST);
-        gl::DepthMask(gl::FALSE);
-        gl::Enable(gl::BLEND);
-        gl::BlendEquation(gl::FUNC_ADD);
-        gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
-    }
-
-    // set up shader
-    shader.set_active();
-    shader.set_uniform_mat4("mvp", mvp);
-    shader.set_uniform_int("mainTexture", 0);
-    shader.set_uniform_int("lightmapTexture", 1);
+    material.shader.set_uniform_mat4("mvp", model * viewproj);
+    material.shader.set_uniform_int("lmTexture", 1);
 }
 
 #[derive(Clone, Copy)]
@@ -321,8 +209,7 @@ pub struct MapVertex {
 }
 
 pub struct BspMapTextures {
-    loaded_textures: Vec<Option<Arc<Texture>>>,
-    err_tex: Texture,
+    loaded_materials: Vec<Arc<Material>>,
     opaque_meshes: Vec<usize>,
     transp_meshes: Vec<usize>,
 }
@@ -330,10 +217,13 @@ pub struct BspMapTextures {
 impl BspMapTextures {
     pub fn new(bsp_file: &BspFile) -> BspMapTextures {
         // load unique textures
-        let mut loaded_textures: Vec<Option<Arc<Texture>>> = Vec::new();
+        let mut loaded_materials: Vec<Arc<Material>> = Vec::new();
 
         let mut opaque_meshes: Vec<usize> = Vec::new();
         let mut transp_meshes: Vec<usize> = Vec::new();
+
+        let map_shader = load_shader("content/shaders/map_shader.toml").unwrap();
+        let mut map_mat = Material::new(map_shader);
 
         let mut err_tex = Texture::new(TextureFormat::RGBA8888, 2, 2, 1);
         err_tex.set_texture_data(0, &[
@@ -341,25 +231,28 @@ impl BspMapTextures {
             Color32::new(0, 0, 0, 255), Color32::new(255, 0, 255, 255)
         ]);
 
+        map_mat.texture.insert("mainTexture".to_string(), TextureSampler { texture: Arc::new(err_tex), filter: false, wrap_s: true, wrap_t: true });
+
+        let map_mat = Arc::new(map_mat);
+
         for (i, tex_info) in bsp_file.tex_info_lump.textures.iter().enumerate() {
-            if tex_info.flags & SURF_TRANS33 != 0 || tex_info.flags & SURF_TRANS66 != 0 {
+            let material = match load_material(format!("content/materials/{}.toml", &tex_info.texture_name).as_str()) {
+                Ok(v) => v,
+                Err(_) => map_mat.clone()
+            };
+
+            if material.transparent {
                 transp_meshes.push(i);
             }
             else {
                 opaque_meshes.push(i);
             }
 
-            let tex = match load_texture(format!("content/textures/{}.ktx", &tex_info.texture_name).as_str()) {
-                Ok(v) => Some(v),
-                Err(_) => None
-            };
-
-            loaded_textures.push(tex);
+            loaded_materials.push(material);
         }
 
         BspMapTextures {
-            loaded_textures,
-            err_tex,
+            loaded_materials,
             opaque_meshes,
             transp_meshes
         }
@@ -395,15 +288,7 @@ struct Model {
 }
 
 pub struct BspMapModelRenderer {
-    models: Vec<Model>,
-    map_shader: Shader,
-    map_shader_position: u32,
-    map_shader_uv: u32,
-    map_shader_lm0: u32,
-    map_shader_lm1: u32,
-    map_shader_lm2: u32,
-    map_shader_lm3: u32,
-    map_shader_color: u32,
+    models: Vec<Model>
 }
 
 impl BspMapModelRenderer {
@@ -446,25 +331,8 @@ impl BspMapModelRenderer {
             });
         }
 
-        let map_shader = Shader::new(MAP_VTX_SHADER, MAP_FRAG_SHADER);
-        let map_shader_position = map_shader.get_attribute_location("in_position");
-        let map_shader_uv = map_shader.get_attribute_location("in_uv");
-        let map_shader_lm0 = map_shader.get_attribute_location("in_lm0");
-        let map_shader_lm1 = map_shader.get_attribute_location("in_lm1");
-        let map_shader_lm2 = map_shader.get_attribute_location("in_lm2");
-        let map_shader_lm3 = map_shader.get_attribute_location("in_lm3");
-        let map_shader_color = map_shader.get_attribute_location("in_color");
-
         BspMapModelRenderer {
-            models,
-            map_shader,
-            map_shader_position,
-            map_shader_uv,
-            map_shader_lm0,
-            map_shader_lm1,
-            map_shader_lm2,
-            map_shader_lm3,
-            map_shader_color
+            models
         }
     }
 
@@ -497,46 +365,28 @@ impl BspMapModelRenderer {
         }
     }
 
-    pub fn draw_model_opaque(self: &mut BspMapModelRenderer, bsp: &BspFile, textures: &BspMapTextures, lm: &BspLightmap, model_idx: usize, model_transform: Matrix4x4, camera_viewproj: Matrix4x4) {
+    pub fn draw_model(self: &mut BspMapModelRenderer, transparent: bool, textures: &BspMapTextures, lm: &BspLightmap, model_idx: usize, model_transform: Matrix4x4, camera_viewproj: Matrix4x4) {
         let model = &self.models[model_idx];
 
-        draw_opaque_geom_setup(&self.map_shader, model_transform, camera_viewproj);
-        bind_lightmap(lm);
-
         for part in &model.parts {
-            let tex_info = &bsp.tex_info_lump.textures[part.tex_idx];
-            if tex_info.flags & SURF_TRANS33 == 0 && tex_info.flags & SURF_TRANS66 == 0 {
+            let material = &textures.loaded_materials[part.tex_idx];
+            if material.transparent == transparent {
+                draw_geom_setup(material, model_transform, camera_viewproj);
+                bind_lightmap(lm);
+
+                let shader_position = material.shader.get_attribute_location("in_pos");
+                let shader_uv = material.shader.get_attribute_location("in_uv");
+                let shader_lm0 = material.shader.get_attribute_location("in_lm0");
+                let shader_lm1 = material.shader.get_attribute_location("in_lm1");
+                let shader_lm2 = material.shader.get_attribute_location("in_lm2");
+                let shader_lm3 = material.shader.get_attribute_location("in_lm3");
+                let shader_color = material.shader.get_attribute_location("in_col");
+
                 unsafe {
-                    bind_texture(textures, part.tex_idx);
-    
                     gl_checked!{ gl::BindBuffer(gl::ARRAY_BUFFER, part.vtx_buffer.handle()) }
                     gl_checked!{ gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, part.idx_buffer.handle()) }
     
-                    setup_vtx_arrays(self.map_shader_position, self.map_shader_uv, self.map_shader_lm0, self.map_shader_lm1, self.map_shader_lm2, self.map_shader_lm3, self.map_shader_color);
-    
-                    // draw geometry
-                    gl_checked!{ gl::DrawElements(gl::TRIANGLES, part.idx_len as i32, gl::UNSIGNED_SHORT, 0 as *const _) }
-                }
-            }
-        }
-    }
-
-    pub fn draw_model_transparent(self: &mut BspMapModelRenderer, bsp: &BspFile, textures: &BspMapTextures, lm: &BspLightmap, model_idx: usize, model_transform: Matrix4x4, camera_viewproj: Matrix4x4) {
-        let model = &self.models[model_idx];
-
-        draw_transparent_geom_setup(&self.map_shader, model_transform, camera_viewproj);
-        bind_lightmap(lm);
-
-        for part in &model.parts {
-            let tex_info = &bsp.tex_info_lump.textures[part.tex_idx];
-            if tex_info.flags & SURF_TRANS33 != 0 || tex_info.flags & SURF_TRANS66 != 0 {
-                unsafe {
-                    bind_texture(textures, part.tex_idx);
-    
-                    gl_checked!{ gl::BindBuffer(gl::ARRAY_BUFFER, part.vtx_buffer.handle()) }
-                    gl_checked!{ gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, part.idx_buffer.handle()) }
-    
-                    setup_vtx_arrays(self.map_shader_position, self.map_shader_uv, self.map_shader_lm0, self.map_shader_lm1, self.map_shader_lm2, self.map_shader_lm3, self.map_shader_color);
+                    setup_vtx_arrays(shader_position, shader_uv, shader_lm0, shader_lm1, shader_lm2, shader_lm3, shader_color);
     
                     // draw geometry
                     gl_checked!{ gl::DrawElements(gl::TRIANGLES, part.idx_len as i32, gl::UNSIGNED_SHORT, 0 as *const _) }
@@ -555,14 +405,6 @@ pub struct BspMapRenderer {
     drawn_faces: Vec<bool>,
     vtx_buffers: Vec<Buffer>,
     idx_buffers: Vec<Buffer>,
-    map_shader: Shader,
-    map_shader_position: u32,
-    map_shader_uv: u32,
-    map_shader_lm0: u32,
-    map_shader_lm1: u32,
-    map_shader_lm2: u32,
-    map_shader_lm3: u32,
-    map_shader_color: u32,
 }
 
 impl BspMapRenderer {
@@ -583,15 +425,6 @@ impl BspMapRenderer {
             idx_buffers.push(idx_buf);
         }
 
-        let map_shader = Shader::new(MAP_VTX_SHADER, MAP_FRAG_SHADER);
-        let map_shader_position = map_shader.get_attribute_location("in_position");
-        let map_shader_uv = map_shader.get_attribute_location("in_uv");
-        let map_shader_lm0 = map_shader.get_attribute_location("in_lm0");
-        let map_shader_lm1 = map_shader.get_attribute_location("in_lm1");
-        let map_shader_lm2 = map_shader.get_attribute_location("in_lm2");
-        let map_shader_lm3 = map_shader.get_attribute_location("in_lm3");
-        let map_shader_color = map_shader.get_attribute_location("in_color");
-
         BspMapRenderer {
             vis: vec![false;num_clusters],
             visible_leaves: HashSet::with_capacity(num_leaves),
@@ -601,14 +434,6 @@ impl BspMapRenderer {
             prev_leaf: -1,
             vtx_buffers,
             idx_buffers,
-            map_shader,
-            map_shader_position,
-            map_shader_uv,
-            map_shader_lm0,
-            map_shader_lm1,
-            map_shader_lm2,
-            map_shader_lm3,
-            map_shader_color,
         }
     }
 
@@ -795,22 +620,31 @@ impl BspMapRenderer {
         return self.visible_leaves.contains(&leaf_index);
     }
 
-    pub fn draw_opaque(self: &mut Self, _bsp: &BspFile, textures: &BspMapTextures, lm: &BspLightmap, _animation_time: f32, camera_viewproj: Matrix4x4) {
-        draw_opaque_geom_setup(&self.map_shader, Matrix4x4::identity(), camera_viewproj);
-        bind_lightmap(lm);
-
+    pub fn draw_opaque(self: &mut Self, textures: &BspMapTextures, lm: &BspLightmap, animation_time: f32, camera_viewproj: Matrix4x4) {
         for i in &textures.opaque_meshes {
             if self.mesh_indices[*i].len() > 0 {
                 let vtx_buf = &self.vtx_buffers[*i];
                 let idx_buf = &self.idx_buffers[*i];
 
-                unsafe {
-                    bind_texture(textures, *i);
+                let material = &textures.loaded_materials[*i];
+                draw_geom_setup(&material, Matrix4x4::identity(), camera_viewproj);
+                bind_lightmap(lm);
 
+                let shader_position = material.shader.get_attribute_location("in_pos");
+                let shader_uv = material.shader.get_attribute_location("in_uv");
+                let shader_lm0 = material.shader.get_attribute_location("in_lm0");
+                let shader_lm1 = material.shader.get_attribute_location("in_lm1");
+                let shader_lm2 = material.shader.get_attribute_location("in_lm2");
+                let shader_lm3 = material.shader.get_attribute_location("in_lm3");
+                let shader_color = material.shader.get_attribute_location("in_col");
+
+                material.shader.set_uniform_float("time", animation_time);
+
+                unsafe {
                     gl_checked!{ gl::BindBuffer(gl::ARRAY_BUFFER, vtx_buf.handle()) }
                     gl_checked!{ gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, idx_buf.handle()) }
     
-                    setup_vtx_arrays(self.map_shader_position, self.map_shader_uv, self.map_shader_lm0, self.map_shader_lm1, self.map_shader_lm2, self.map_shader_lm3, self.map_shader_color);
+                    setup_vtx_arrays(shader_position, shader_uv, shader_lm0, shader_lm1, shader_lm2, shader_lm3, shader_color);
 
                     // draw geometry
                     gl_checked!{ gl::DrawElements(gl::TRIANGLES, self.mesh_indices[*i].len() as i32, gl::UNSIGNED_SHORT, 0 as *const _) }
@@ -819,22 +653,31 @@ impl BspMapRenderer {
         }
     }
 
-    pub fn draw_transparent(self: &mut Self, _bsp: &BspFile, textures: &BspMapTextures, lm: &BspLightmap, _animation_time: f32, camera_viewproj: Matrix4x4) {
-        draw_transparent_geom_setup(&self.map_shader, Matrix4x4::identity(), camera_viewproj);
-        bind_lightmap(lm);
-
+    pub fn draw_transparent(self: &mut Self, textures: &BspMapTextures, lm: &BspLightmap, animation_time: f32, camera_viewproj: Matrix4x4) {
         for i in &textures.transp_meshes {
             if self.mesh_indices[*i].len() > 0 {
                 let vtx_buf = &self.vtx_buffers[*i];
                 let idx_buf = &self.idx_buffers[*i];
 
-                unsafe {
-                    bind_texture(textures, *i);
+                let material = &textures.loaded_materials[*i];
+                draw_geom_setup(&material, Matrix4x4::identity(), camera_viewproj);
+                bind_lightmap(lm);
 
+                let shader_position = material.shader.get_attribute_location("in_pos");
+                let shader_uv = material.shader.get_attribute_location("in_uv");
+                let shader_lm0 = material.shader.get_attribute_location("in_lm0");
+                let shader_lm1 = material.shader.get_attribute_location("in_lm1");
+                let shader_lm2 = material.shader.get_attribute_location("in_lm2");
+                let shader_lm3 = material.shader.get_attribute_location("in_lm3");
+                let shader_color = material.shader.get_attribute_location("in_col");
+
+                material.shader.set_uniform_float("time", animation_time);
+
+                unsafe {
                     gl_checked!{ gl::BindBuffer(gl::ARRAY_BUFFER, vtx_buf.handle()) }
                     gl_checked!{ gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, idx_buf.handle()) }
-
-                    setup_vtx_arrays(self.map_shader_position, self.map_shader_uv, self.map_shader_lm0, self.map_shader_lm1, self.map_shader_lm2, self.map_shader_lm3, self.map_shader_color);
+    
+                    setup_vtx_arrays(shader_position, shader_uv, shader_lm0, shader_lm1, shader_lm2, shader_lm3, shader_color);
 
                     // draw geometry
                     gl_checked!{ gl::DrawElements(gl::TRIANGLES, self.mesh_indices[*i].len() as i32, gl::UNSIGNED_SHORT, 0 as *const _) }

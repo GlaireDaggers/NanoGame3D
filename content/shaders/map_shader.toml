@@ -1,0 +1,49 @@
+vs = '''
+attribute vec4 in_pos;
+attribute vec2 in_uv;
+attribute vec3 in_lm0;
+attribute vec3 in_lm1;
+attribute vec3 in_lm2;
+attribute vec3 in_lm3;
+attribute vec4 in_col;
+
+varying vec2 vtx_uv;
+varying vec3 vtx_lm0;
+varying vec3 vtx_lm1;
+varying vec3 vtx_lm2;
+varying vec3 vtx_lm3;
+varying vec4 vtx_col;
+
+uniform mat4 mvp;
+
+void main() {
+	gl_Position = mvp * vec4(in_pos.xyz, 1.0);
+	vtx_uv = in_uv;
+	vtx_lm0 = in_lm0;
+	vtx_lm1 = in_lm1;
+	vtx_lm2 = in_lm2;
+	vtx_lm3 = in_lm3;
+	vtx_col = in_col;
+}
+'''
+
+ps = '''
+varying mediump vec2 vtx_uv;
+varying mediump vec3 vtx_lm0;
+varying mediump vec3 vtx_lm1;
+varying mediump vec3 vtx_lm2;
+varying mediump vec3 vtx_lm3;
+varying mediump vec4 vtx_col;
+
+uniform sampler2D mainTexture;
+uniform sampler2D lmTexture;
+
+void main() {
+	mediump vec4 lm =
+		(texture2D(lmTexture, vtx_lm0.xy) * vtx_lm0.z) +
+		(texture2D(lmTexture, vtx_lm1.xy) * vtx_lm1.z) +
+		(texture2D(lmTexture, vtx_lm2.xy) * vtx_lm2.z) +
+		(texture2D(lmTexture, vtx_lm3.xy) * vtx_lm3.z);
+	gl_FragColor = texture2D(mainTexture, vtx_uv) * lm * vtx_col * vec4(2.0, 2.0, 2.0, 1.0);
+}
+'''
