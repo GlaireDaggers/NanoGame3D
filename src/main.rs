@@ -4,7 +4,7 @@ use asset_loader::load_model;
 use bsp::{bspcommon::aabb_aabb_intersects, bspfile::BspFile, bsplightmap::BspLightmap, bsprenderer::{BspMapModelRenderer, BspMapRenderer, BspMapTextures, NUM_CUSTOM_LIGHT_LAYERS}};
 use component::{camera::{Camera, FPCamera}, charactercontroller::CharacterController, door::{Door, DoorLink, DoorOpener}, fpview::FPView, light::Light, mapmodel::MapModel, playerinput::PlayerInput, rendermesh::RenderMesh, rotator::Rotator, transform3d::Transform3D, triggerable::{TriggerLink, TriggerState}};
 use hecs::{CommandBuffer, Entity, World};
-use math::Vector3;
+use math::{Quaternion, Vector3};
 use sdl2::controller::{Axis, Button, GameController};
 use system::{character_system::{character_apply_input_update, character_init, character_input_update, character_rotation_update, character_update}, door_system::door_system_update, flycam_system::flycam_system_update, fpcam_system::fpcam_update, fpview_system::{fpview_eye_update, fpview_input_system_update}, render_system::render_system, rotator_system::rotator_system_update, triggerable_system::trigger_link_system_update};
 
@@ -122,6 +122,20 @@ impl GameState {
                     for (key, val) in entity_data {
                         println!("worldspawn: {} = {}", key, val);
                     }
+                }
+                "prop_static" => {
+                    let pos = parse_utils::parse_prop_vec3(&entity_data, "origin", Vector3::zero());
+                    let angles = parse_utils::parse_prop_vec3(&entity_data, "angles", Vector3::zero());
+                    let model_path = parse_utils::get_prop_str(&entity_data, "model", "");
+                    let scale = parse_utils::parse_prop_vec3(&entity_data, "scale", Vector3::new(1.0, 1.0, 1.0));
+
+                    let rot = Quaternion::from_euler(Vector3::new(angles.x.to_radians(), angles.z.to_radians(), angles.y.to_radians()));
+                    let model = load_model(format!("content/{}", model_path).as_str()).unwrap();
+
+                    world.spawn((
+                        Transform3D::default().with_position(pos).with_rotation(rot).with_scale(scale),
+                        RenderMesh::new(model),
+                    ));
                 }
                 "light" => {
                     let light_pos = parse_utils::parse_prop_vec3(&entity_data, "origin", Vector3::zero());
@@ -360,7 +374,7 @@ impl GameState {
 
         {
             let mut test_model_transform = self.world.get::<&mut Transform3D>(self.test_model).unwrap();
-            test_model_transform.position = Vector3::new((self.time_data.total_time * 0.1).sin() * 80.0, (self.time_data.total_time * 0.25).sin() * 150.0, 50.0);
+            test_model_transform.position = Vector3::new((self.time_data.total_time * 0.1).sin() * 150.0, (self.time_data.total_time * 0.25).sin() * 150.0, 50.0);
         }
 
         // update

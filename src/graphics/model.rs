@@ -77,11 +77,11 @@ impl MeshPart {
         let positions = reader.read_positions().unwrap();
         let mut vertices = Vec::new();
 
-        // GLTF -> NG3D: (.z, .x, .y)
+        // GLTF -> NG3D: (.x, -.z, .y)
 
         for pos in positions {
             let vtx = MeshVertex {
-                position: Vector4::new(pos[2], pos[0], pos[1], 1.0),
+                position: Vector4::new(pos[0], -pos[2], pos[1], 1.0),
                 normal: Vector4::zero(),
                 tangent: Vector4::zero(),
                 texcoord0: Vector2::zero(),
@@ -96,13 +96,13 @@ impl MeshPart {
 
         if let Some(normals) = reader.read_normals() {
             for (idx, val) in normals.enumerate() {
-                vertices[idx].normal = Vector4::new(val[2], val[0], val[1], 0.0);
+                vertices[idx].normal = Vector4::new(val[0], -val[2], val[1], 0.0);
             }
         }
 
         if let Some(tangents) = reader.read_tangents() {
             for (idx, val) in tangents.enumerate() {
-                vertices[idx].tangent = Vector4::new(val[2], val[0], val[1], 0.0);
+                vertices[idx].tangent = Vector4::new(val[0], -val[2], val[1], 0.0);
             }
         }
 
