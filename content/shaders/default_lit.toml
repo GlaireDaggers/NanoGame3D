@@ -12,7 +12,7 @@ varying vec4 vtx_normal;
 varying vec4 vtx_tangent;
 varying vec2 vtx_texcoord0;
 varying vec2 vtx_texcoord1;
-varying vec2 vtx_color;
+varying vec4 vtx_color;
 
 uniform mat4 localToWorld;
 uniform mat4 mvp;
@@ -23,6 +23,7 @@ void main() {
     vtx_tangent = localToWorld * vec4(in_tangent.xyz, 0.0);
     vtx_texcoord0 = in_texcoord0;
     vtx_texcoord1 = in_texcoord1;
+    vtx_color = in_color;
 }
 '''
 
