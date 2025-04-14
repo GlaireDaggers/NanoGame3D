@@ -1,8 +1,9 @@
 use std::{collections::HashMap, ffi::CStr, fs::File};
 
+use asset_loader::load_model;
 use bsp::{bspcommon::aabb_aabb_intersects, bspfile::BspFile, bsplightmap::BspLightmap, bsprenderer::{BspMapModelRenderer, BspMapRenderer, BspMapTextures, NUM_CUSTOM_LIGHT_LAYERS}};
-use component::{camera::{Camera, FPCamera}, charactercontroller::CharacterController, door::{Door, DoorLink, DoorOpener}, fpview::FPView, light::Light, mapmodel::MapModel, playerinput::PlayerInput, rotator::Rotator, transform3d::Transform3D, triggerable::{TriggerLink, TriggerState}};
-use hecs::{CommandBuffer, World};
+use component::{camera::{Camera, FPCamera}, charactercontroller::CharacterController, door::{Door, DoorLink, DoorOpener}, fpview::FPView, light::Light, mapmodel::MapModel, playerinput::PlayerInput, rendermesh::RenderMesh, rotator::Rotator, transform3d::Transform3D, triggerable::{TriggerLink, TriggerState}};
+use hecs::{CommandBuffer, Entity, World};
 use math::Vector3;
 use sdl2::controller::{Axis, Button, GameController};
 use system::{character_system::{character_apply_input_update, character_init, character_input_update, character_rotation_update, character_update}, door_system::door_system_update, flycam_system::flycam_system_update, fpcam_system::fpcam_update, fpview_system::{fpview_eye_update, fpview_input_system_update}, render_system::render_system, rotator_system::rotator_system_update, triggerable_system::trigger_link_system_update};
@@ -13,6 +14,7 @@ const MAX_TICK_ACCUM: f32 = TICK_INTERVAL * 4.0;
 extern crate sdl2;
 extern crate gl;
 extern crate byteorder;
+extern crate basis_universal;
 
 pub mod math;
 pub mod bsp;
@@ -57,6 +59,7 @@ pub struct TimeData {
 struct GameState {
     world: World,
     time_data: TimeData,
+    test_model: Entity,
     map_data: Option<MapData>,
 }
 
@@ -317,10 +320,18 @@ impl GameState {
             FPCamera::new(player_entity)
         ));
 
+        // test static model entity
+        let test_model = world.spawn((
+            Transform3D::default().with_position(Vector3::new(0.0, 0.0, 50.0)).with_scale(Vector3::new(100.0, 100.0, 100.0)),
+            RenderMesh::new(load_model("content/models/dragon-2_80.glb").unwrap()),
+            Rotator { rot_axis: Vector3::unit_z(), rot_speed: 45.0_f32.to_radians() }
+        ));
+
         GameState {
             world,
             time_data: TimeData::default(),
             map_data: Some(map_data),
+            test_model,
         }
     }
 
@@ -346,6 +357,11 @@ impl GameState {
         // update time
         self.time_data.delta_time = delta;
         self.time_data.total_time += delta;
+
+        {
+            let mut test_model_transform = self.world.get::<&mut Transform3D>(self.test_model).unwrap();
+            test_model_transform.position = Vector3::new((self.time_data.total_time * 0.1).sin() * 80.0, (self.time_data.total_time * 0.25).sin() * 150.0, 50.0);
+        }
 
         // update
         if let Some(map_data) = &mut self.map_data {
@@ -405,6 +421,13 @@ fn main() {
     let gl_ver = unsafe { CStr::from_ptr(gl::GetString(gl::VERSION) as *const _) }.to_str().unwrap();
     let gl_renderer = unsafe { CStr::from_ptr(gl::GetString(gl::RENDERER) as *const _) }.to_str().unwrap();
     println!("{} (GL: {})", gl_renderer, gl_ver);
+
+    unsafe {
+        gl::DepthRangef(0.0, 1.0);
+    }
+
+    // init basis decoder
+    basis_universal::transcoder_init();
 
     sdl_video.gl_set_swap_interval(1).unwrap();
 

@@ -1,15 +1,17 @@
-use std::{collections::HashMap, fs::{self, File}, io::Error, marker::PhantomData, sync::{Arc, RwLock, Weak}};
+use std::{collections::HashMap, fs::{self, File}, io::{Error, Read}, marker::PhantomData, path::Path, sync::{Arc, RwLock, Weak}};
 
-use ktx::KtxInfo;
+use basis_universal::{TranscodeParameters, Transcoder, TranscoderTextureFormat};
+use gltf::{import_buffers, Gltf};
 use lazy_static::lazy_static;
 use toml::{map::Map, Table};
 
-use crate::{graphics::{gfx::{GL_COMPRESSED_RGBA_S3TC_DXT1_EXT, GL_COMPRESSED_RGBA_S3TC_DXT3_EXT, GL_COMPRESSED_RGB_S3TC_DXT1_EXT}, material::{Material, TextureSampler}, shader::Shader, texture::{Texture, TextureFormat}}, parse_utils::{parse_vec2, parse_vec3, parse_vec4}};
+use crate::{graphics::{material::{Material, TextureSampler}, model::Model, shader::Shader, texture::{Texture, TextureFormat}}, parse_utils::{parse_vec2, parse_vec3, parse_vec4}};
 
 lazy_static! {
     static ref TEXTURE_CACHE: RwLock<TextureCache> = RwLock::new(TextureCache::new());
     static ref SHADER_CACHE: RwLock<ShaderCache> = RwLock::new(ShaderCache::new());
     static ref MATERIAL_CACHE: RwLock<MaterialCache> = RwLock::new(MaterialCache::new());
+    static ref MODEL_CACHE: RwLock<ModelCache> = RwLock::new(ModelCache::new());
 }
 
 pub fn load_texture(path: &str) -> Result<Arc<Texture>, ResourceError> {
@@ -27,15 +29,9 @@ pub fn load_material(path: &str) -> Result<Arc<Material>, ResourceError> {
     return material_cache.load(path);
 }
 
-pub fn load_env(env_name: &str) -> [Arc<Texture>;6] {
-    let env_ft = load_texture(format!("/cd/content/env/{}1ft.ktx", env_name).as_str()).unwrap();
-    let env_bk = load_texture(format!("/cd/content/env/{}1bk.ktx", env_name).as_str()).unwrap();
-    let env_lf = load_texture(format!("/cd/content/env/{}1lf.ktx", env_name).as_str()).unwrap();
-    let env_rt = load_texture(format!("/cd/content/env/{}1rt.ktx", env_name).as_str()).unwrap();
-    let env_up = load_texture(format!("/cd/content/env/{}1up.ktx", env_name).as_str()).unwrap();
-    let env_dn = load_texture(format!("/cd/content/env/{}1dn.ktx", env_name).as_str()).unwrap();
-
-    [env_ft, env_bk, env_lf, env_rt, env_up, env_dn]
+pub fn load_model(path: &str) -> Result<Arc<Model>, ResourceError> {
+    let model_cache = &mut MODEL_CACHE.write().unwrap();
+    return model_cache.load(path);
 }
 
 #[derive(Debug)]
@@ -53,48 +49,47 @@ pub struct TextureLoader {
 
 impl ResourceLoader<Texture> for TextureLoader {
     fn load_resource(path: &str) -> Result<Texture, ResourceError> {    
-        let tex_file = match File::open(path) {
+        let mut tex_file = match File::open(path) {
             Ok(v) => v,
             Err(e) => return Err(ResourceError::IOError(e))
         };
 
-        // decode KTX texture
-        let decoder = match ktx::Decoder::new(tex_file) {
-            Ok(v) => v,
-            Err(_) => return Err(ResourceError::ParseError)
-        };
+        let mut tex_data = Vec::new();
+        tex_file.read_to_end(&mut tex_data).unwrap();
 
-        // TODO: I think eventually I'd like to switch to Basis Universal for textures
+        // create transcoder
+        let mut transcoder = Transcoder::new();
+        transcoder.prepare_transcoding(&tex_data).unwrap();
 
-        // find appropriate texture format
-        let tex_fmt = if decoder.gl_type() == gl::UNSIGNED_BYTE && decoder.gl_format() == gl::RGBA {
-            TextureFormat::RGBA8888
-        } else if decoder.gl_type() == gl::UNSIGNED_SHORT_5_6_5 && decoder.gl_format() == gl::RGB {
-            TextureFormat::RGB565
-        } else if decoder.gl_type() == gl::UNSIGNED_SHORT_4_4_4_4 && decoder.gl_format() == gl::RGBA {
-            TextureFormat::RGBA4444
-        } else if decoder.gl_internal_format() == GL_COMPRESSED_RGB_S3TC_DXT1_EXT {
-            TextureFormat::DXT1
-        } else if decoder.gl_internal_format() == GL_COMPRESSED_RGBA_S3TC_DXT1_EXT {
-            TextureFormat::DXT1A
-        }  else if decoder.gl_internal_format() == GL_COMPRESSED_RGBA_S3TC_DXT3_EXT {
-            TextureFormat::DXT3
-        } else {
-            println!("Failed decoding KTX image: unsupported pixel format");
-            return Err(ResourceError::ParseError);
-        };
+        let img_info = transcoder.image_info(&tex_data, 0).unwrap();
+
+        #[cfg(feature = "use_etc1")]
+        let (target_fmt, basis_fmt) = (TextureFormat::ETC1, TranscoderTextureFormat::ETC1_RGB);
+
+        #[cfg(not(feature = "use_etc1"))]
+        let (target_fmt, basis_fmt) = (TextureFormat::DXT1, TranscoderTextureFormat::BC1_RGB);
 
         let mut tex = Texture::new(
-            tex_fmt,
-            decoder.pixel_width() as i32,
-            decoder.pixel_height() as i32,
-            decoder.mipmap_levels() as i32);
+            target_fmt,
+            img_info.m_width as i32,
+            img_info.m_height as i32,
+            img_info.m_total_levels as i32
+        );
 
         // upload each mip slice
-        let mut level: i32 = 0;
-        for tex_level in decoder.read_textures() {
-            tex.set_texture_data(level, &tex_level);
-            level += 1;
+        for tex_level in 0..img_info.m_total_levels {
+            // transcode mip level
+            let data = transcoder.transcode_image_level(&tex_data, basis_fmt,
+                TranscodeParameters {
+                    image_index: 0,
+                    level_index: tex_level,
+                    decode_flags: None,
+                    output_row_pitch_in_blocks_or_pixels: None,
+                    output_rows_in_pixels: None
+                }
+            ).unwrap();
+
+            tex.set_texture_data(tex_level as i32, &data);
         }
 
         Ok(tex)
@@ -126,12 +121,54 @@ impl ResourceLoader<Shader> for ShaderLoader {
             None => return Err(ResourceError::ParseError)
         };
 
-        let shader_preamble = "#version 100\n";
+        let shader_preamble = "#version 100\nprecision highp float;\n";
 
         Ok(Shader::new(
             format!("{}\n{}", shader_preamble, shader_vtx_src).as_str(),
             format!("{}\n{}", shader_preamble, shader_frag_src).as_str()
         ))
+    }
+}
+
+pub struct ModelLoader {
+}
+
+impl ResourceLoader<Model> for ModelLoader {
+    fn load_resource(path: &str) -> Result<Model, ResourceError> {
+        let model_name = Path::new(path).file_stem().unwrap();
+        let base_path = Path::new(path).parent().unwrap();
+
+        let material_path = format!("{}/{}", base_path.to_str().unwrap(), model_name.to_str().unwrap());
+
+        let gltf = match Gltf::open(path) {
+            Ok(v) => v,
+            Err(e) => {
+                match e {
+                    gltf::Error::Io(error) => {
+                        return Err(ResourceError::IOError(error))
+                    },
+                    _ => {
+                        return Err(ResourceError::ParseError)
+                    }
+                }
+            }
+        };
+
+        let buffers = match import_buffers(&gltf.document, Some(base_path), gltf.blob) {
+            Ok(v) => v,
+            Err(e) => {
+                match e {
+                    gltf::Error::Io(error) => {
+                        return Err(ResourceError::IOError(error))
+                    },
+                    _ => {
+                        return Err(ResourceError::ParseError)
+                    }
+                }
+            }
+        };
+
+        Ok(Model::from_gltf(&gltf.document, &buffers, &material_path))
     }
 }
 
@@ -186,6 +223,15 @@ impl ResourceLoader<Material> for MaterialLoader {
         if material_data.contains_key("transparent") {
             if let Some(transparent) = material_data["transparent"].as_bool() {
                 material.transparent = transparent;
+            }
+            else {
+                return Err(ResourceError::ParseError);
+            }
+        }
+
+        if material_data.contains_key("enable-cull") {
+            if let Some(enable_cull) = material_data["enable-cull"].as_bool() {
+                material.enable_cull = enable_cull;
             }
             else {
                 return Err(ResourceError::ParseError);
@@ -458,3 +504,4 @@ impl<TResource, TResourceLoader> ResourceCache<TResource, TResourceLoader>
 pub type TextureCache = ResourceCache<Texture, TextureLoader>;
 pub type ShaderCache = ResourceCache<Shader, ShaderLoader>;
 pub type MaterialCache = ResourceCache<Material, MaterialLoader>;
+pub type ModelCache = ResourceCache<Model, ModelLoader>;

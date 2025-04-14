@@ -58,9 +58,10 @@ macro_rules! gl_checked {
     };
 }
 
-pub const GL_COMPRESSED_RGB_S3TC_DXT1_EXT: u32 = 0x83F0;
+pub const GL_COMPRESSED_RGB_S3TC_DXT1_EXT: u32  = 0x83F0;
 pub const GL_COMPRESSED_RGBA_S3TC_DXT1_EXT: u32 = 0x83F1;
 pub const GL_COMPRESSED_RGBA_S3TC_DXT3_EXT: u32 = 0x83F2;
+pub const GL_ETC1_RGB8_OES: u32                 = 0x8D64;
 
 pub fn create_shader(shader_type: u32, shader_src: &str) -> u32 {
     unsafe {

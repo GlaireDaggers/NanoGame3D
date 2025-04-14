@@ -650,10 +650,10 @@ impl Matrix4x4 {
 
         mat.m[0][0] = two_n / width;
         mat.m[1][1] = two_n / height;
-        mat.m[2][2] = far / (near - far);
+        mat.m[2][2] = -(far + near) / (far - near);
         mat.m[2][3] = -1.0;
-        mat.m[3][2] = (near * far) /
-                    (near - far);
+        mat.m[3][2] = (-2.0 * near * far) /
+                    (far - near);
 
         return mat;
     }

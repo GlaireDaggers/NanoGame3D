@@ -1,12 +1,64 @@
 use hecs::World;
 
-use crate::{bsp::bspcommon::{aabb_frustum, coord_space_transform, extract_frustum}, component::{camera::Camera, mapmodel::MapModel, transform3d::Transform3D}, math::Matrix4x4, MapData, TimeData, WindowData};
+use crate::{bsp::{bspcommon::{aabb_frustum, coord_space_transform, extract_frustum}, bspfile::LSHProbe}, component::{camera::Camera, mapmodel::MapModel, rendermesh::RenderMesh, transform3d::Transform3D}, graphics::model::MeshVertex, math::Matrix4x4, MapData, TimeData, WindowData};
+
+fn draw_mesh_iter(mesh: &RenderMesh, transparent: bool, cur_node: &mut usize, parent_transform: Matrix4x4, viewproj: &Matrix4x4, sh: &LSHProbe) {
+    let node = &mesh.mesh.nodes[*cur_node];
+    let node_xform = node.transform * parent_transform;
+    let mvp = node_xform * *viewproj;
+
+    if node.mesh_index >= 0 {
+        // draw mesh attached to node
+        let node_mesh = &mesh.mesh.meshes[node.mesh_index as usize];
+
+        for part in &node_mesh.parts {
+            if let Some((vtx_buffer, idx_buffer)) = &part.buffers {
+                let mat = &mesh.mesh.materials[part.material_index];
+
+                if mat.transparent == transparent {
+                    mat.apply();
+
+                    mat.shader.set_uniform_vec4("shR", sh.sh_r);
+                    mat.shader.set_uniform_vec4("shG", sh.sh_g);
+                    mat.shader.set_uniform_vec4("shB", sh.sh_b);
+                    mat.shader.set_uniform_mat4("localToWorld", node_xform);
+                    mat.shader.set_uniform_mat4("mvp", mvp);
+
+                    unsafe {
+                        gl::FrontFace(part.winding);
+
+                        gl::BindBuffer(gl::ARRAY_BUFFER, vtx_buffer.handle());
+                        gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, idx_buffer.handle());
+
+                        MeshVertex::setup_vtx_arrays(&mat.shader);
+
+                        // draw geometry
+                        gl::DrawElements(part.topology, part.indices.len() as i32, gl::UNSIGNED_SHORT, 0 as *const _);
+                    }
+                }
+            }
+        }
+    }
+
+    *cur_node += 1;
+
+    // draw children
+    for _ in 0..node.num_children {
+        draw_mesh_iter(mesh, transparent, cur_node, node_xform, viewproj, sh);
+    }
+}
 
 /// System which performs all rendering (world + entities)
 pub fn render_system(time: &TimeData, window_data: &WindowData, map_data: &mut MapData, world: &mut World) {
     // gather map models
     let mut mapmodel_iter = world.query::<(&MapModel, &Transform3D)>();
     let mapmodels = mapmodel_iter
+        .iter()
+        .collect::<Vec<_>>();
+
+    // gather static meshes
+    let mut mesh_iter = world.query::<(&RenderMesh, &Transform3D)>();
+    let meshes = mesh_iter
         .iter()
         .collect::<Vec<_>>();
 
@@ -83,20 +135,6 @@ pub fn render_system(time: &TimeData, window_data: &WindowData, map_data: &mut M
         // update with new camera position
         renderer.update(&frustum, time.total_time, &map_data.light_layers, &map_data.map, &map_data.map_textures, &map_data.map_lightmap, transform.position);
 
-        // draw skybox
-        /*match env_data {
-            Some(v) => {
-                draw_env_quad(&v[0], &Quaternion::identity(), &cam_env_view, &cam_proj);
-                draw_env_quad(&v[1], &Quaternion::from_euler(Vector3::new(0.0, 0.0, 180.0_f32.to_radians())), &cam_env_view, &cam_proj);
-                draw_env_quad(&v[2], &Quaternion::from_euler(Vector3::new(0.0, 0.0, 90.0_f32.to_radians())), &cam_env_view, &cam_proj);
-                draw_env_quad(&v[3], &Quaternion::from_euler(Vector3::new(0.0, 0.0, -90.0_f32.to_radians())), &cam_env_view, &cam_proj);
-                draw_env_quad(&v[4], &Quaternion::from_euler(Vector3::new(-90.0_f32.to_radians(), 0.0, -90.0_f32.to_radians())), &cam_env_view, &cam_proj);
-                draw_env_quad(&v[5], &Quaternion::from_euler(Vector3::new(90.0_f32.to_radians(), 0.0, -90.0_f32.to_radians())), &cam_env_view, &cam_proj);
-            }
-            _ => {
-            }
-        };*/
-
         // draw opaque map geometry
         renderer.draw_opaque(&map_data.map_textures, &map_data.map_lightmap, time.total_time, viewproj);
 
@@ -104,11 +142,40 @@ pub fn render_system(time: &TimeData, window_data: &WindowData, map_data: &mut M
             map_data.map_model_renderer.draw_model(false, &map_data.map_textures, &map_data.map_lightmap, *idx, *transform, viewproj);
         }
 
+        // draw opaque mesh parts
+        for (_, (mesh, transform)) in &meshes {
+            let sh = map_data.map.lsh_grid_lump.sample_position(transform.position);
+
+            let model_transform = Matrix4x4::scale(transform.scale)
+                * Matrix4x4::rotation(transform.rotation)
+                * Matrix4x4::translation(transform.position);
+            
+            let mut cur_node = 0;
+            while cur_node < mesh.mesh.nodes.len() {
+                draw_mesh_iter(mesh, false, &mut cur_node, model_transform, &viewproj, &sh);
+            }
+        }
+
         // draw transparent map geometry
         renderer.draw_transparent(&map_data.map_textures, &map_data.map_lightmap, time.total_time, viewproj);
 
         for (idx, transform) in visible_model_indices.iter().zip(&visible_model_transforms) {
             map_data.map_model_renderer.draw_model(true, &map_data.map_textures, &map_data.map_lightmap, *idx, *transform, viewproj);
+        }
+
+        // draw transparent mesh parts
+        // TODO: this feels super inefficient for deep hierarchies. Maybe just avoid those?
+        for (_, (mesh, transform)) in &meshes {
+            let sh = map_data.map.lsh_grid_lump.sample_position(transform.position);
+
+            let model_transform = Matrix4x4::scale(transform.scale)
+                * Matrix4x4::rotation(transform.rotation)
+                * Matrix4x4::translation(transform.position);
+            
+            let mut cur_node = 0;
+            while cur_node < mesh.mesh.nodes.len() {
+                draw_mesh_iter(mesh, true, &mut cur_node, model_transform, &viewproj, &sh);
+            }
         }
 
         camera_index += 1;

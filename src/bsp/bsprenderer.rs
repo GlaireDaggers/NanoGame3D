@@ -191,6 +191,10 @@ fn bind_lightmap(lm: &BspLightmap) {
 }
 
 fn draw_geom_setup(material: &Material, model: Matrix4x4, viewproj: Matrix4x4) {
+    unsafe {
+        gl::FrontFace(gl::CW);
+    }
+
     material.apply();
 
     material.shader.set_uniform_mat4("mvp", model * viewproj);

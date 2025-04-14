@@ -2,7 +2,7 @@ use std::ptr::null;
 
 use crate::gl_checked;
 
-use super::gfx::{GL_COMPRESSED_RGBA_S3TC_DXT1_EXT, GL_COMPRESSED_RGBA_S3TC_DXT3_EXT, GL_COMPRESSED_RGB_S3TC_DXT1_EXT};
+use super::gfx::{GL_COMPRESSED_RGBA_S3TC_DXT1_EXT, GL_COMPRESSED_RGBA_S3TC_DXT3_EXT, GL_COMPRESSED_RGB_S3TC_DXT1_EXT, GL_ETC1_RGB8_OES};
 
 #[derive(Clone, Copy, Debug)]
 pub enum TextureFormat {
@@ -12,6 +12,7 @@ pub enum TextureFormat {
     DXT1,
     DXT1A,
     DXT3,
+    ETC1,
 }
 
 pub struct Texture {
@@ -43,6 +44,7 @@ impl Texture {
             TextureFormat::DXT1 => (GL_COMPRESSED_RGB_S3TC_DXT1_EXT, 0, 0, true),
             TextureFormat::DXT1A => (GL_COMPRESSED_RGBA_S3TC_DXT1_EXT, 0, 0, true),
             TextureFormat::DXT3 => (GL_COMPRESSED_RGBA_S3TC_DXT3_EXT, 0, 0, true),
+            TextureFormat::ETC1 => (GL_ETC1_RGB8_OES, 0, 0, true),
         };
 
         unsafe {

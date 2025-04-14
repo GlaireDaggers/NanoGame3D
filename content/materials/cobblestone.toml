@@ -1,5 +1,4 @@
-shader = "content/shaders/map_scroll.toml"
-transparent = false
+shader = "content/shaders/map_shader.toml"
 
 [texture2D]
-mainTexture = { path = "content/textures/cobblestone.ktx", filter = true, wrap.s = true, wrap.t = true }
+mainTexture = { path = "content/textures/cobblestone.basis", filter = true, wrap.s = true, wrap.t = true }

@@ -20,6 +20,7 @@ pub struct Material {
     
     pub transparent : bool,
     
+    pub enable_cull : bool,
     pub cull : types::GLenum,
     pub depth_test : bool,
     pub depth_write : bool,
@@ -43,6 +44,7 @@ impl Material {
             shader,
             
             transparent: false,
+            enable_cull: true,
             cull: gl::BACK,
             depth_test: true,
             depth_write: true,
@@ -65,6 +67,7 @@ impl Material {
         self.shader.set_active();
 
         unsafe {
+            if self.enable_cull { gl::Enable(gl::CULL_FACE) } else { gl::Disable(gl::CULL_FACE) };
             gl::CullFace(self.cull);
             
             if self.depth_test { gl::Enable(gl::DEPTH_TEST) } else { gl::Disable(gl::DEPTH_TEST) };
