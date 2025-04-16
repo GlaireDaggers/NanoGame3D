@@ -413,6 +413,7 @@ impl BspMapModelRenderer {
 }
 
 struct StaticPropMesh {
+    frame_idx: u32,
     mat_idx: usize,
     topology: gl::types::GLenum,
     vtx_buffer: Buffer,
@@ -491,7 +492,7 @@ impl BspMapRenderer {
             let mut vtx_buffer = Buffer::new((vtx_slice.len() * size_of::<StaticPropVertex>()) as isize);
             vtx_buffer.set_data(0, vtx_slice);
 
-            static_props.push(StaticPropMesh { topology: sprop.topology, mat_idx: sprop.material as usize, vtx_buffer, idx_buffer, num_indices: idx_slice.len() });
+            static_props.push(StaticPropMesh { frame_idx: u32::MAX, topology: sprop.topology, mat_idx: sprop.material as usize, vtx_buffer, idx_buffer, num_indices: idx_slice.len() });
         }
 
         BspMapRenderer {
@@ -594,6 +595,16 @@ impl BspMapRenderer {
                 let face = &bsp.face_lump.faces[face_idx];
                 let tex_idx = face.texture_info as usize;
                 unpack_face(bsp, textures, &light_styles, face_idx, &mut edges, &mut self.mesh_vertices[tex_idx], &mut self.mesh_indices[tex_idx], lm);
+            }
+
+            let leaf_props = &bsp.leaf_sprop_lump.leaves[*i];
+            let start_prop_idx = leaf_props.first_prop as usize;
+            let end_prop_idx = start_prop_idx + (leaf_props.num_props as usize);
+            let prop_indices = &bsp.leaf_sprop_lump.indices[start_prop_idx..end_prop_idx];
+
+            // mark currently visible static props
+            for prop_idx in prop_indices {
+                self.static_props[*prop_idx as usize].frame_idx = self.cur_frame;
             }
         }
 
@@ -724,7 +735,7 @@ impl BspMapRenderer {
 
         for prop in &self.static_props {
             let mat = &textures.sprop_materials[prop.mat_idx];
-            if mat.transparent == false {
+            if prop.frame_idx == self.cur_frame && mat.transparent == false {
                 draw_geom_setup(&mat, Matrix4x4::identity(), camera_viewproj);
                 mat.shader.set_uniform_float("time", animation_time);
 
@@ -777,7 +788,7 @@ impl BspMapRenderer {
 
         for prop in &self.static_props {
             let mat = &textures.sprop_materials[prop.mat_idx];
-            if mat.transparent {
+            if prop.frame_idx == self.cur_frame && mat.transparent {
                 draw_geom_setup(&mat, Matrix4x4::identity(), camera_viewproj);
                 mat.shader.set_uniform_float("time", animation_time);
 

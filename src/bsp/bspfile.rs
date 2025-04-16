@@ -270,6 +270,16 @@ pub struct LSHGridLump {
     pub probes: Vec<LSHProbe>
 }
 
+pub struct LeafStaticProps {
+    pub first_prop: u32,
+    pub num_props: u32,
+}
+
+pub struct LeafStaticPropLump {
+    pub leaves: Vec<LeafStaticProps>,
+    pub indices: Vec<u32>,
+}
+
 pub struct StaticProp {
     pub material: u32,
     pub topology: gl::types::GLenum,
@@ -875,6 +885,31 @@ impl LSHGridLump {
     }
 }
 
+
+impl LeafStaticPropLump {
+    pub fn new<R: Seek + ReadBytesExt>(reader: &mut R, info: &BspLumpInfo) -> LeafStaticPropLump {
+        reader.seek(std::io::SeekFrom::Start(info.offset as u64)).unwrap();
+
+        let leaf_count = reader.read_u32::<LittleEndian>().unwrap();
+        let index_count = reader.read_u32::<LittleEndian>().unwrap();
+
+        let mut leaves = Vec::new();
+        for _ in 0..leaf_count {
+            let first_prop = reader.read_u32::<LittleEndian>().unwrap();
+            let num_props = reader.read_u32::<LittleEndian>().unwrap();
+
+            leaves.push(LeafStaticProps { first_prop, num_props });
+        }
+
+        let mut indices = Vec::new();
+        for _ in 0..index_count {
+            indices.push(reader.read_u32::<LittleEndian>().unwrap());
+        }
+
+        LeafStaticPropLump { leaves, indices }
+    }
+}
+
 impl StaticPropLump {
     pub fn new<R: Seek + ReadBytesExt>(reader: &mut R, info: &BspLumpInfo) -> StaticPropLump {
         reader.seek(std::io::SeekFrom::Start(info.offset as u64)).unwrap();
@@ -996,6 +1031,7 @@ pub struct BspFile {
     pub brush_side_lump: BrushSideLump,
     pub submodel_lump: SubModelLump,
     pub lsh_grid_lump: LSHGridLump,
+    pub leaf_sprop_lump: LeafStaticPropLump,
     pub sprop_lump: StaticPropLump,
     pub sprop_indices_lump: StaticPropIndicesLump,
     pub sprop_vertices_lump: StaticPropVerticesLump,
@@ -1080,6 +1116,7 @@ impl BspFile {
         }
 
         let lsh_grid_lump = LSHGridLump::new(reader, &bspx_lumps["LSH_GRID"]);
+        let leaf_sprop_lump = LeafStaticPropLump::new(reader, &bspx_lumps["LEAF_SPROP"]);
         let sprop_lump = StaticPropLump::new(reader, &bspx_lumps["SPROP"]);
         let sprop_indices_lump = StaticPropIndicesLump::new(reader, &bspx_lumps["SPROP_INDICES"]);
         let sprop_vertices_lump = StaticPropVerticesLump::new(reader, &bspx_lumps["SPROP_VERTICES"]);
@@ -1103,6 +1140,7 @@ impl BspFile {
             brush_side_lump,
             submodel_lump,
             lsh_grid_lump,
+            leaf_sprop_lump,
             sprop_lump,
             sprop_indices_lump,
             sprop_vertices_lump,
