@@ -3,7 +3,7 @@ use std::{collections::HashMap, io::Seek};
 use byteorder::{LittleEndian, ReadBytesExt};
 use regex::Regex;
 
-use crate::{math::{Vector3, Vector4}, misc::Color32};
+use crate::{math::{Vector2, Vector3, Vector4}, misc::Color32};
 
 const BSP_MAGIC: u32 = 0x50534249;  // IBSP
 const BSPX_MAGIC: u32 = 0x58505342; // BSPX
@@ -30,12 +30,28 @@ pub const CONTENTS_MIST: u32        = 64;
 
 pub const MASK_SOLID: u32           = CONTENTS_SOLID | CONTENTS_WINDOW;
 
+fn read_vec2f<R: ReadBytesExt>(reader: &mut R) -> Vector2 {
+    let x = reader.read_f32::<LittleEndian>().unwrap();
+    let y = reader.read_f32::<LittleEndian>().unwrap();
+
+    Vector2::new(x, y)
+}
+
 fn read_vec3f<R: ReadBytesExt>(reader: &mut R) -> Vector3 {
     let x = reader.read_f32::<LittleEndian>().unwrap();
     let y = reader.read_f32::<LittleEndian>().unwrap();
     let z = reader.read_f32::<LittleEndian>().unwrap();
 
     Vector3::new(x, y, z)
+}
+
+fn read_vec4f<R: ReadBytesExt>(reader: &mut R) -> Vector4 {
+    let x = reader.read_f32::<LittleEndian>().unwrap();
+    let y = reader.read_f32::<LittleEndian>().unwrap();
+    let z = reader.read_f32::<LittleEndian>().unwrap();
+    let w = reader.read_f32::<LittleEndian>().unwrap();
+
+    Vector4::new(x, y, z, w)
 }
 
 fn read_vec3s<R: ReadBytesExt>(reader: &mut R) -> Vector3 {
@@ -60,6 +76,15 @@ fn read_color24<R: ReadBytesExt>(reader: &mut R) -> Color32 {
     let b = reader.read_u8().unwrap();
 
     Color32::new(r, g, b, 255)
+}
+
+fn read_color32<R: ReadBytesExt>(reader: &mut R) -> Color32 {
+    let r = reader.read_u8().unwrap();
+    let g = reader.read_u8().unwrap();
+    let b = reader.read_u8().unwrap();
+    let a = reader.read_u8().unwrap();
+
+    Color32::new(r, g, b, a)
 }
 
 pub struct BspLumpInfo {
@@ -243,6 +268,39 @@ pub struct LSHGridLump {
     pub grid_size: Vector3,
     pub grid_mins: Vector3,
     pub probes: Vec<LSHProbe>
+}
+
+pub struct StaticProp {
+    pub material: u32,
+    pub topology: gl::types::GLenum,
+    pub first_index: u32,
+    pub num_indices: u32,
+    pub first_vertex: u32,
+    pub num_vertices: u32,
+}
+
+pub struct StaticPropLump {
+    pub props: Vec<StaticProp>
+}
+
+pub struct StaticPropIndicesLump {
+    pub indices: Vec<u16>
+}
+
+pub struct StaticPropVertex {
+    pub position: Vector4,
+    pub normal: Vector4,
+    pub tangent: Vector4,
+    pub texcoord: Vector2,
+    pub color: Color32,
+}
+
+pub struct StaticPropVerticesLump {
+    pub vertices: Vec<StaticPropVertex>
+}
+
+pub struct StaticPropMaterialsLump {
+    pub materials: Vec<String>
 }
 
 impl EntityLump {
@@ -817,6 +875,109 @@ impl LSHGridLump {
     }
 }
 
+impl StaticPropLump {
+    pub fn new<R: Seek + ReadBytesExt>(reader: &mut R, info: &BspLumpInfo) -> StaticPropLump {
+        reader.seek(std::io::SeekFrom::Start(info.offset as u64)).unwrap();
+
+        let prop_count = reader.read_u32::<LittleEndian>().unwrap();
+
+        let mut props = Vec::new();
+        for _ in 0..prop_count {
+            let material = reader.read_u32::<LittleEndian>().unwrap();
+            let mode = reader.read_u32::<LittleEndian>().unwrap();
+            let first_index = reader.read_u32::<LittleEndian>().unwrap();
+            let num_indices = reader.read_u32::<LittleEndian>().unwrap();
+            let first_vertex = reader.read_u32::<LittleEndian>().unwrap();
+            let num_vertices = reader.read_u32::<LittleEndian>().unwrap();
+
+            let topology = match mode {
+                0 => {
+                    gl::TRIANGLES
+                },
+                1 => {
+                    gl::TRIANGLE_STRIP
+                },
+                _ => {
+                    panic!("Invalid static prop topology")
+                }
+            };
+
+            props.push(StaticProp { material, topology, first_index, num_indices, first_vertex, num_vertices });
+        }
+
+        StaticPropLump { props }
+    }
+}
+
+impl StaticPropIndicesLump {
+    pub fn new<R: Seek + ReadBytesExt>(reader: &mut R, info: &BspLumpInfo) -> StaticPropIndicesLump {
+        reader.seek(std::io::SeekFrom::Start(info.offset as u64)).unwrap();
+
+        let index_count = reader.read_u32::<LittleEndian>().unwrap();
+
+        let mut indices = Vec::new();
+        for _ in 0..index_count {
+            indices.push(reader.read_u16::<LittleEndian>().unwrap());
+        }
+
+        StaticPropIndicesLump { indices }
+    }
+}
+
+impl StaticPropVerticesLump {
+    pub fn new<R: Seek + ReadBytesExt>(reader: &mut R, info: &BspLumpInfo) -> StaticPropVerticesLump {
+        reader.seek(std::io::SeekFrom::Start(info.offset as u64)).unwrap();
+
+        let vertex_count = reader.read_u32::<LittleEndian>().unwrap();
+
+        let mut vertices = Vec::new();
+        for _ in 0..vertex_count {
+            let position = read_vec3f(reader);
+            let normal = read_vec3f(reader);
+            let tangent = read_vec4f(reader);
+            let texcoord = read_vec2f(reader);
+            let color = read_color32(reader);
+
+            vertices.push(StaticPropVertex { 
+                position: Vector4::new(position.x, position.y, position.z, 1.0),
+                normal: Vector4::new(normal.x, normal.y, normal.z, 1.0),
+                tangent,
+                texcoord,
+                color
+            });
+        }
+
+        StaticPropVerticesLump { vertices }
+    }
+}
+
+impl StaticPropMaterialsLump {
+    pub fn new<R: Seek + ReadBytesExt>(reader: &mut R, info: &BspLumpInfo) -> StaticPropMaterialsLump {
+        reader.seek(std::io::SeekFrom::Start(info.offset as u64)).unwrap();
+
+        let material_count = reader.read_u32::<LittleEndian>().unwrap();
+
+        let mut materials = Vec::new();
+        for _ in 0..material_count {
+            let mut material_name: [u8; 64] = [0; 64];
+            reader.read_exact(&mut material_name).unwrap();
+
+            let mut name_len = 64;
+            for i in 0..64 {
+                if material_name[i] == 0 {
+                    name_len = i;
+                    break;
+                }
+            }
+
+            let material_name = unsafe { std::str::from_utf8_unchecked(&material_name[0..name_len]) }.to_owned();
+            materials.push(material_name);
+        }
+
+        StaticPropMaterialsLump { materials }
+    }
+}
+
 pub struct BspFile {
     pub entity_lump: EntityLump,
     pub vertex_lump: VertexLump,
@@ -835,6 +996,10 @@ pub struct BspFile {
     pub brush_side_lump: BrushSideLump,
     pub submodel_lump: SubModelLump,
     pub lsh_grid_lump: LSHGridLump,
+    pub sprop_lump: StaticPropLump,
+    pub sprop_indices_lump: StaticPropIndicesLump,
+    pub sprop_vertices_lump: StaticPropVerticesLump,
+    pub sprop_materials_lump: StaticPropMaterialsLump,
 }
 
 impl BspFile {
@@ -915,6 +1080,10 @@ impl BspFile {
         }
 
         let lsh_grid_lump = LSHGridLump::new(reader, &bspx_lumps["LSH_GRID"]);
+        let sprop_lump = StaticPropLump::new(reader, &bspx_lumps["SPROP"]);
+        let sprop_indices_lump = StaticPropIndicesLump::new(reader, &bspx_lumps["SPROP_INDICES"]);
+        let sprop_vertices_lump = StaticPropVerticesLump::new(reader, &bspx_lumps["SPROP_VERTICES"]);
+        let sprop_materials_lump = StaticPropMaterialsLump::new(reader, &bspx_lumps["SPROP_MATERIALS"]);
 
         BspFile {
             entity_lump,
@@ -933,7 +1102,11 @@ impl BspFile {
             brush_lump,
             brush_side_lump,
             submodel_lump,
-            lsh_grid_lump
+            lsh_grid_lump,
+            sprop_lump,
+            sprop_indices_lump,
+            sprop_vertices_lump,
+            sprop_materials_lump,
         }
     }
 }

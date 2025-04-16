@@ -1,8 +1,8 @@
 use std::{collections::HashSet, mem::offset_of, sync::Arc};
 
 use lazy_static::lazy_static;
-use crate::{asset_loader::{load_material, load_shader}, gl_checked, graphics::{buffer::Buffer, material::{Material, TextureSampler}, texture::{Texture, TextureFormat}}, math::{Matrix4x4, Vector2, Vector3, Vector4}, misc::Color32};
-use super::{bspcommon::{aabb_aabb_intersects, aabb_frustum}, bspfile::{BspFile, Edge, SURF_NODRAW, SURF_SKY, SURF_TRANS33, SURF_TRANS66}, bsplightmap::BspLightmap};
+use crate::{asset_loader::{load_material, load_shader}, gl_checked, graphics::{buffer::Buffer, material::{Material, TextureSampler}, shader::Shader, texture::{Texture, TextureFormat}}, math::{Matrix4x4, Vector2, Vector3, Vector4}, misc::Color32};
+use super::{bspcommon::{aabb_aabb_intersects, aabb_frustum}, bspfile::{BspFile, Edge, StaticPropVertex, SURF_NODRAW, SURF_SKY, SURF_TRANS33, SURF_TRANS66}, bsplightmap::BspLightmap};
 
 pub const NUM_CUSTOM_LIGHT_LAYERS: usize = 30;
 pub const CUSTOM_LIGHT_LAYER_START: usize = 32;
@@ -214,6 +214,7 @@ pub struct MapVertex {
 
 pub struct BspMapTextures {
     loaded_materials: Vec<Arc<Material>>,
+    sprop_materials: Vec<Arc<Material>>,
     opaque_meshes: Vec<usize>,
     transp_meshes: Vec<usize>,
 }
@@ -222,12 +223,13 @@ impl BspMapTextures {
     pub fn new(bsp_file: &BspFile) -> BspMapTextures {
         // load unique textures
         let mut loaded_materials: Vec<Arc<Material>> = Vec::new();
+        let mut sprop_materials: Vec<Arc<Material>> = Vec::new();
 
         let mut opaque_meshes: Vec<usize> = Vec::new();
         let mut transp_meshes: Vec<usize> = Vec::new();
 
         let map_shader = load_shader("content/shaders/map_shader.toml").unwrap();
-        let mut map_mat = Material::new(map_shader);
+        let mut err_mat = Material::new(map_shader);
 
         let mut err_tex = Texture::new(TextureFormat::RGBA8888, 2, 2, 1);
         err_tex.set_texture_data(0, &[
@@ -235,14 +237,14 @@ impl BspMapTextures {
             Color32::new(0, 0, 0, 255), Color32::new(255, 0, 255, 255)
         ]);
 
-        map_mat.texture.insert("mainTexture".to_string(), TextureSampler { texture: Arc::new(err_tex), filter: false, wrap_s: true, wrap_t: true });
+        err_mat.texture.insert("mainTexture".to_string(), TextureSampler { texture: Arc::new(err_tex), filter: false, wrap_s: true, wrap_t: true });
 
-        let map_mat = Arc::new(map_mat);
+        let err_mat = Arc::new(err_mat);
 
         for (i, tex_info) in bsp_file.tex_info_lump.textures.iter().enumerate() {
             let material = match load_material(format!("content/materials/{}.toml", &tex_info.texture_name).as_str()) {
                 Ok(v) => v,
-                Err(_) => map_mat.clone()
+                Err(_) => err_mat.clone()
             };
 
             if material.transparent {
@@ -255,8 +257,18 @@ impl BspMapTextures {
             loaded_materials.push(material);
         }
 
+        for mat_name in &bsp_file.sprop_materials_lump.materials {
+            let material = match load_material(format!("content/models/{}_PROP.toml", mat_name).as_str()) {
+                Ok(v) => v,
+                Err(_) => err_mat.clone()
+            };
+
+            sprop_materials.push(material);
+        }
+
         BspMapTextures {
             loaded_materials,
+            sprop_materials,
             opaque_meshes,
             transp_meshes
         }
@@ -400,15 +412,49 @@ impl BspMapModelRenderer {
     }
 }
 
+struct StaticPropMesh {
+    mat_idx: usize,
+    topology: gl::types::GLenum,
+    vtx_buffer: Buffer,
+    idx_buffer: Buffer,
+    num_indices: usize,
+}
+
+impl StaticPropVertex {
+    pub fn setup_vtx_arrays(shader: &Shader) {
+        let position = shader.get_attribute_location("in_position");
+        let normal = shader.get_attribute_location("in_normal");
+        let tangent = shader.get_attribute_location("in_tangent");
+        let texcoord0 = shader.get_attribute_location("in_texcoord");
+        let color = shader.get_attribute_location("in_color");
+
+        unsafe {
+            gl::EnableVertexAttribArray(position);
+            gl::EnableVertexAttribArray(normal);
+            gl::EnableVertexAttribArray(tangent);
+            gl::EnableVertexAttribArray(texcoord0);
+            gl::EnableVertexAttribArray(color);
+
+            gl::VertexAttribPointer(position, 4, gl::FLOAT, gl::FALSE, size_of::<StaticPropVertex>() as i32, offset_of!(StaticPropVertex, position) as *const _);
+            gl::VertexAttribPointer(normal, 4, gl::FLOAT, gl::FALSE, size_of::<StaticPropVertex>() as i32, offset_of!(StaticPropVertex, normal) as *const _);
+            gl::VertexAttribPointer(tangent, 4, gl::FLOAT, gl::FALSE, size_of::<StaticPropVertex>() as i32, offset_of!(StaticPropVertex, tangent) as *const _);
+            gl::VertexAttribPointer(texcoord0, 2, gl::FLOAT, gl::FALSE, size_of::<StaticPropVertex>() as i32, offset_of!(StaticPropVertex, texcoord) as *const _);
+            gl::VertexAttribPointer(color, 4, gl::UNSIGNED_BYTE, gl::TRUE, size_of::<StaticPropVertex>() as i32, offset_of!(StaticPropVertex, color) as *const _);
+        }
+    }
+}
+
 pub struct BspMapRenderer {
     vis: Vec<bool>,
     prev_leaf: i32,
     mesh_vertices: Vec<Vec<MapVertex>>,
     mesh_indices: Vec<Vec<u16>>,
     visible_leaves: HashSet<usize>,
-    drawn_faces: Vec<bool>,
+    drawn_faces: Vec<u32>,
+    cur_frame: u32,
     vtx_buffers: Vec<Buffer>,
     idx_buffers: Vec<Buffer>,
+    static_props: Vec<StaticPropMesh>,
 }
 
 impl BspMapRenderer {
@@ -429,15 +475,36 @@ impl BspMapRenderer {
             idx_buffers.push(idx_buf);
         }
 
+        let mut static_props = Vec::new();
+        for sprop in &bsp_file.sprop_lump.props {
+            let idx_start = sprop.first_index as usize;
+            let idx_end = idx_start + sprop.num_indices as usize;
+            let idx_slice = &bsp_file.sprop_indices_lump.indices[idx_start .. idx_end];
+
+            let vtx_start = sprop.first_vertex as usize;
+            let vtx_end = vtx_start + sprop.num_vertices as usize;
+            let vtx_slice = &bsp_file.sprop_vertices_lump.vertices[vtx_start .. vtx_end];
+
+            let mut idx_buffer = Buffer::new((idx_slice.len() * size_of::<u16>()) as isize);
+            idx_buffer.set_data(0, idx_slice);
+
+            let mut vtx_buffer = Buffer::new((vtx_slice.len() * size_of::<StaticPropVertex>()) as isize);
+            vtx_buffer.set_data(0, vtx_slice);
+
+            static_props.push(StaticPropMesh { topology: sprop.topology, mat_idx: sprop.material as usize, vtx_buffer, idx_buffer, num_indices: idx_slice.len() });
+        }
+
         BspMapRenderer {
             vis: vec![false;num_clusters],
             visible_leaves: HashSet::with_capacity(num_leaves),
             mesh_vertices: vec![Vec::new();num_textures],
             mesh_indices: vec![Vec::new();num_textures],
-            drawn_faces: vec![false;num_faces],
+            drawn_faces: vec![0;num_faces],
+            cur_frame: 0,
             prev_leaf: -1,
             vtx_buffers,
             idx_buffers,
+            static_props,
         }
     }
 
@@ -470,6 +537,8 @@ impl BspMapRenderer {
 
     /// Call each frame before rendering. Recalculates visible leaves & rebuilds geometry when necessary
     pub fn update(self: &mut Self, frustum: &[Vector4], anim_time: f32, light_layers: &[f32;NUM_CUSTOM_LIGHT_LAYERS], bsp: &BspFile, textures: &BspMapTextures, lm: &BspLightmap, position: Vector3) {
+        self.cur_frame = self.cur_frame.wrapping_add(1);
+
         let leaf_index = bsp.calc_leaf_index(&position);
         let leaf = &bsp.leaf_lump.leaves[leaf_index as usize];
 
@@ -508,9 +577,6 @@ impl BspMapRenderer {
 
         let mut edges: Vec<Edge> = Vec::new();
 
-        // faces might be shared by multiple leaves. keep track of them so we don't draw them more than once
-        self.drawn_faces.fill(false);
-
         for i in &self.visible_leaves {
             let leaf = &bsp.leaf_lump.leaves[*i];
             let start_face_idx = leaf.first_leaf_face as usize;
@@ -519,11 +585,11 @@ impl BspMapRenderer {
             for leaf_face in start_face_idx..end_face_idx {
                 let face_idx = bsp.leaf_face_lump.faces[leaf_face] as usize;
 
-                if self.drawn_faces[face_idx] {
+                if self.drawn_faces[face_idx] == self.cur_frame {
                     continue;
                 }
 
-                self.drawn_faces[face_idx] = true;
+                self.drawn_faces[face_idx] = self.cur_frame;
 
                 let face = &bsp.face_lump.faces[face_idx];
                 let tex_idx = face.texture_info as usize;
@@ -655,6 +721,26 @@ impl BspMapRenderer {
                 }
             }
         }
+
+        for prop in &self.static_props {
+            let mat = &textures.sprop_materials[prop.mat_idx];
+            if mat.transparent == false {
+                draw_geom_setup(&mat, Matrix4x4::identity(), camera_viewproj);
+                mat.shader.set_uniform_float("time", animation_time);
+
+                unsafe {
+                    gl::FrontFace(gl::CCW);
+                    
+                    gl_checked!{ gl::BindBuffer(gl::ARRAY_BUFFER, prop.vtx_buffer.handle()) }
+                    gl_checked!{ gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, prop.idx_buffer.handle()) }
+
+                    StaticPropVertex::setup_vtx_arrays(&mat.shader);
+
+                    // draw geometry
+                    gl_checked!{ gl::DrawElements(prop.topology, prop.num_indices as i32, gl::UNSIGNED_SHORT, 0 as *const _) }
+                }
+            }
+        }
     }
 
     pub fn draw_transparent(self: &mut Self, textures: &BspMapTextures, lm: &BspLightmap, animation_time: f32, camera_viewproj: Matrix4x4) {
@@ -685,6 +771,26 @@ impl BspMapRenderer {
 
                     // draw geometry
                     gl_checked!{ gl::DrawElements(gl::TRIANGLES, self.mesh_indices[*i].len() as i32, gl::UNSIGNED_SHORT, 0 as *const _) }
+                }
+            }
+        }
+
+        for prop in &self.static_props {
+            let mat = &textures.sprop_materials[prop.mat_idx];
+            if mat.transparent {
+                draw_geom_setup(&mat, Matrix4x4::identity(), camera_viewproj);
+                mat.shader.set_uniform_float("time", animation_time);
+
+                unsafe {
+                    gl::FrontFace(gl::CCW);
+                    
+                    gl_checked!{ gl::BindBuffer(gl::ARRAY_BUFFER, prop.vtx_buffer.handle()) }
+                    gl_checked!{ gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, prop.idx_buffer.handle()) }
+
+                    StaticPropVertex::setup_vtx_arrays(&mat.shader);
+
+                    // draw geometry
+                    gl_checked!{ gl::DrawElements(prop.topology, prop.num_indices as i32, gl::UNSIGNED_SHORT, 0 as *const _) }
                 }
             }
         }
