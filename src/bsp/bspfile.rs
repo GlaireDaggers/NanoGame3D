@@ -815,12 +815,10 @@ impl LSHGridLump {
             let l1_g = read_vec3f(reader);
             let l1_b = read_vec3f(reader);
 
-            // TODO: x and y seem flipped?
-
             probes.push(LSHProbe {
-                sh_r: Vector4::new(-l1_r.x, -l1_r.y, l1_r.z, l0_rgb.x),
-                sh_g: Vector4::new(-l1_g.x, -l1_g.y, l1_g.z, l0_rgb.y),
-                sh_b: Vector4::new(-l1_b.x, -l1_b.y, l1_b.z, l0_rgb.z),
+                sh_r: Vector4::new(l1_r.x, l1_r.y, l1_r.z, l0_rgb.x),
+                sh_g: Vector4::new(l1_g.x, l1_g.y, l1_g.z, l0_rgb.y),
+                sh_b: Vector4::new(l1_b.x, l1_b.y, l1_b.z, l0_rgb.z),
             });
         }
 
