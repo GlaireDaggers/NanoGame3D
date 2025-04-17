@@ -1,27 +1,33 @@
 vs = '''
 attribute vec4 in_position;
 attribute vec2 in_texcoord;
-attribute vec4 in_color;
+attribute vec4 in_light0;
+attribute vec4 in_light1;
+attribute vec4 in_light2;
+attribute vec4 in_light3;
 
 varying vec2 vtx_texcoord;
-varying vec4 vtx_color;
+varying vec3 vtx_color;
 
 uniform mat4 mvp;
 
 void main() {
 	gl_Position = mvp * vec4(in_position.xyz, 1.0);
 	vtx_texcoord = in_texcoord;
-	vtx_color = in_color;
+	vtx_color = (in_light0.rgb * in_light0.a) +
+		(in_light1.rgb * in_light1.a) +
+		(in_light2.rgb * in_light2.a) +
+		(in_light3.rgb * in_light3.a);
 }
 '''
 
 ps = '''
 varying mediump vec2 vtx_texcoord;
-varying mediump vec4 vtx_color;
+varying mediump vec3 vtx_color;
 
 uniform sampler2D mainTexture;
 
 void main() {
-	gl_FragColor = texture2D(mainTexture, vtx_texcoord) * vtx_color * vec4(2.0, 2.0, 2.0, 1.0);
+	gl_FragColor = texture2D(mainTexture, vtx_texcoord) * vec4(vtx_color * 2.0, 1.0);
 }
 '''

@@ -375,6 +375,22 @@ struct StaticPropMesh {
     vtx_buffer: Buffer,
     idx_buffer: Buffer,
     num_indices: usize,
+    vertices: Vec<StaticPropVertex>,
+}
+
+impl StaticPropMesh {
+    pub fn update(&mut self, light_styles: &[f32; 256]) {
+        for vtx in &mut self.vertices {
+            for i in 0..4 {
+                if vtx.light_styles[i] != 255 {
+                    let l = light_styles[vtx.light_styles[i] as usize];
+                    vtx.light_colors[i].a = (l.clamp(0.0, 1.0) * 255.0) as u8;
+                }
+            }
+        }
+
+        self.vtx_buffer.set_data(0, &self.vertices);
+    }
 }
 
 impl StaticPropVertex {
@@ -383,20 +399,34 @@ impl StaticPropVertex {
         let normal = shader.get_attribute_location("in_normal");
         let tangent = shader.get_attribute_location("in_tangent");
         let texcoord0 = shader.get_attribute_location("in_texcoord");
-        let color = shader.get_attribute_location("in_color");
+        let light0 = shader.get_attribute_location("in_light0");
+        let light1 = shader.get_attribute_location("in_light1");
+        let light2 = shader.get_attribute_location("in_light2");
+        let light3 = shader.get_attribute_location("in_light3");
 
         unsafe {
             gl::EnableVertexAttribArray(position);
             gl::EnableVertexAttribArray(normal);
             gl::EnableVertexAttribArray(tangent);
             gl::EnableVertexAttribArray(texcoord0);
-            gl::EnableVertexAttribArray(color);
+            gl::EnableVertexAttribArray(light0);
+            gl::EnableVertexAttribArray(light1);
+            gl::EnableVertexAttribArray(light2);
+            gl::EnableVertexAttribArray(light3);
+
+            let light_colors_offset_0 = offset_of!(StaticPropVertex, light_colors);
+            let light_colors_offset_1 = offset_of!(StaticPropVertex, light_colors) + size_of::<Color32>();
+            let light_colors_offset_2 = offset_of!(StaticPropVertex, light_colors) + (size_of::<Color32>() * 2);
+            let light_colors_offset_3 = offset_of!(StaticPropVertex, light_colors) + (size_of::<Color32>() * 3);
 
             gl::VertexAttribPointer(position, 4, gl::FLOAT, gl::FALSE, size_of::<StaticPropVertex>() as i32, offset_of!(StaticPropVertex, position) as *const _);
             gl::VertexAttribPointer(normal, 4, gl::FLOAT, gl::FALSE, size_of::<StaticPropVertex>() as i32, offset_of!(StaticPropVertex, normal) as *const _);
             gl::VertexAttribPointer(tangent, 4, gl::FLOAT, gl::FALSE, size_of::<StaticPropVertex>() as i32, offset_of!(StaticPropVertex, tangent) as *const _);
             gl::VertexAttribPointer(texcoord0, 2, gl::FLOAT, gl::FALSE, size_of::<StaticPropVertex>() as i32, offset_of!(StaticPropVertex, texcoord) as *const _);
-            gl::VertexAttribPointer(color, 4, gl::UNSIGNED_BYTE, gl::TRUE, size_of::<StaticPropVertex>() as i32, offset_of!(StaticPropVertex, color) as *const _);
+            gl::VertexAttribPointer(light0, 4, gl::UNSIGNED_BYTE, gl::TRUE, size_of::<StaticPropVertex>() as i32, light_colors_offset_0 as *const _);
+            gl::VertexAttribPointer(light1, 4, gl::UNSIGNED_BYTE, gl::TRUE, size_of::<StaticPropVertex>() as i32, light_colors_offset_1 as *const _);
+            gl::VertexAttribPointer(light2, 4, gl::UNSIGNED_BYTE, gl::TRUE, size_of::<StaticPropVertex>() as i32, light_colors_offset_2 as *const _);
+            gl::VertexAttribPointer(light3, 4, gl::UNSIGNED_BYTE, gl::TRUE, size_of::<StaticPropVertex>() as i32, light_colors_offset_3 as *const _);
         }
     }
 }
@@ -448,7 +478,7 @@ impl BspMapRenderer {
             let mut vtx_buffer = Buffer::new((vtx_slice.len() * size_of::<StaticPropVertex>()) as isize);
             vtx_buffer.set_data(0, vtx_slice);
 
-            static_props.push(StaticPropMesh { frame_idx: u32::MAX, topology: sprop.topology, mat_idx: sprop.material as usize, vtx_buffer, idx_buffer, num_indices: idx_slice.len() });
+            static_props.push(StaticPropMesh { frame_idx: u32::MAX, topology: sprop.topology, mat_idx: sprop.material as usize, vtx_buffer, idx_buffer, num_indices: idx_slice.len(), vertices: vtx_slice.to_vec() });
         }
 
         BspMapRenderer {
@@ -547,9 +577,10 @@ impl BspMapRenderer {
             let end_prop_idx = start_prop_idx + (leaf_props.num_props as usize);
             let prop_indices = &bsp.leaf_sprop_lump.indices[start_prop_idx..end_prop_idx];
 
-            // mark currently visible static props
+            // mark currently visible static props & update geometry
             for prop_idx in prop_indices {
                 self.static_props[*prop_idx as usize].frame_idx = self.cur_frame;
+                self.static_props[*prop_idx as usize].update(light_layers);
             }
         }
 

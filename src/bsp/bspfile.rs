@@ -319,12 +319,15 @@ pub struct StaticPropIndicesLump {
     pub indices: Vec<u16>
 }
 
+#[derive(Clone)]
 pub struct StaticPropVertex {
     pub position: Vector4,
     pub normal: Vector4,
     pub tangent: Vector4,
     pub texcoord: Vector2,
     pub color: Color32,
+    pub light_colors: [Color32; 4],
+    pub light_styles: [u8; 4],
 }
 
 pub struct StaticPropVerticesLump {
@@ -1002,12 +1005,27 @@ impl StaticPropVerticesLump {
             let texcoord = read_vec2f(reader);
             let color = read_color32(reader);
 
+            let mut light_styles = [0;4];
+            reader.read_exact(&mut light_styles).unwrap();
+
+            let mut light_colors = [Color32::new(0, 0, 0, 0); 4];
+
+            for i in 0..4 {
+                if light_styles[i] != 255 {
+                    light_colors[i].r = reader.read_u8().unwrap();
+                    light_colors[i].g = reader.read_u8().unwrap();
+                    light_colors[i].b = reader.read_u8().unwrap();
+                }
+            }
+
             vertices.push(StaticPropVertex { 
                 position: Vector4::new(position.x, position.y, position.z, 1.0),
                 normal: Vector4::new(normal.x, normal.y, normal.z, 1.0),
                 tangent,
                 texcoord,
-                color
+                color,
+                light_styles,
+                light_colors
             });
         }
 
