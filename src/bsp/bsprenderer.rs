@@ -1,40 +1,7 @@
 use std::{collections::HashSet, mem::offset_of, sync::Arc};
 
-use lazy_static::lazy_static;
 use crate::{asset_loader::{load_material, load_shader}, gl_checked, graphics::{buffer::Buffer, material::{Material, TextureSampler}, shader::Shader, texture::{Texture, TextureFormat}}, math::{Matrix4x4, Vector2, Vector3, Vector4}, misc::Color32};
 use super::{bspcommon::{aabb_aabb_intersects, aabb_frustum}, bspfile::{BspFile, Edge, StaticPropVertex, SURF_NODRAW, SURF_SKY, SURF_TRANS33, SURF_TRANS66}, bsplightmap::BspLightmap};
-
-pub const NUM_CUSTOM_LIGHT_LAYERS: usize = 30;
-pub const CUSTOM_LIGHT_LAYER_START: usize = 32;
-pub const CUSTOM_LIGHT_LAYER_END: usize = CUSTOM_LIGHT_LAYER_START + NUM_CUSTOM_LIGHT_LAYERS;
-
-lazy_static! {
-    static ref LIGHTSTYLES: [Vec<f32>;12] = [
-        make_light_table(b"m"),
-        make_light_table(b"mmnmmommommnonmmonqnmmo"),
-        make_light_table(b"abcdefghijklmnopqrstuvwxyzyxwvutsrqponmlkjihgfedcba"),
-        make_light_table(b"mmmmmaaaaammmmmaaaaaabcdefgabcdefg"),
-        make_light_table(b"mamamamamama"),
-        make_light_table(b"mamamamamamajklmnopqrstuvwxyzyxwvutsrqponmlkj"),
-        make_light_table(b"nmonqnmomnmomomno"),
-        make_light_table(b"mmmaaaabcdefgmmmmaaaammmaamm"),
-        make_light_table(b"mmmaaammmaaammmabcdefaaaammmmabcdefmmmaaaa"),
-        make_light_table(b"aaaaaaaazzzzzzzz"),
-        make_light_table(b"mmamammmmammamamaaamammma"),
-        make_light_table(b"abcdefghijklmnopqrrqponmlkjihgfedcba"),
-    ];
-}
-
-// convert Quake-style light animation table to float array ('a' is minimum light, 'z' is maximum light)
-fn make_light_table(data: &[u8]) -> Vec<f32> {
-    let mut output = vec![0.0;data.len()];
-
-    for i in 0..data.len() {
-        output[i] = (data[i] - 97) as f32 / 25.0;
-    }
-
-    output
-}
 
 fn unpack_face(bsp: &BspFile, textures: &BspMapTextures, light_styles: &[f32], face_idx: usize, edge_buffer: &mut Vec<Edge>, geo: &mut Vec<MapVertex>, index: &mut Vec<u16>, lm: &BspLightmap) {
     let face = &bsp.face_lump.faces[face_idx];
@@ -310,7 +277,7 @@ pub struct BspMapModelRenderer {
 impl BspMapModelRenderer {
     pub fn new(bsp_file: &BspFile, textures: &BspMapTextures, lm: &BspLightmap) -> BspMapModelRenderer {
         let mut light_styles = [0.0;256];
-        light_styles[0] = LIGHTSTYLES[0][0];
+        light_styles[0] = 1.0;
 
         let mut models = Vec::new();
         let mut edges = Vec::new();
@@ -353,26 +320,15 @@ impl BspMapModelRenderer {
     }
 
     /// call each frame to update lightmap animation for a given set of visible models
-    pub fn update(self: &mut BspMapModelRenderer, light_layers: &[f32;NUM_CUSTOM_LIGHT_LAYERS], models: &[usize], animation_time: f32) {
-        let lightstyle_frame = (animation_time * 10.0) as usize;
-        let mut light_styles = [0.0;256];
-
-        for (idx, tbl) in LIGHTSTYLES.iter().enumerate() {
-            light_styles[idx] = tbl[lightstyle_frame % tbl.len()];
-        }
-
-        for (idx, sc) in light_layers.iter().enumerate() {
-            light_styles[idx + CUSTOM_LIGHT_LAYER_START] = *sc;
-        }
-
+    pub fn update(self: &mut BspMapModelRenderer, light_layers: &[f32;256], models: &[usize]) {
         for idx in models {
             for part in &mut self.models[*idx].parts {
                 if part.needs_update {
                     for vtx in part.geom.iter_mut() {
-                        vtx.lm0.z = light_styles[part.light_styles[0] as usize];
-                        vtx.lm1.z = light_styles[part.light_styles[1] as usize];
-                        vtx.lm2.z = light_styles[part.light_styles[2] as usize];
-                        vtx.lm3.z = light_styles[part.light_styles[3] as usize];
+                        vtx.lm0.z = light_layers[part.light_styles[0] as usize];
+                        vtx.lm1.z = light_layers[part.light_styles[1] as usize];
+                        vtx.lm2.z = light_layers[part.light_styles[2] as usize];
+                        vtx.lm3.z = light_layers[part.light_styles[3] as usize];
                     }
     
                     part.vtx_buffer.set_data(0, &part.geom);
@@ -537,22 +493,11 @@ impl BspMapRenderer {
     }
 
     /// Call each frame before rendering. Recalculates visible leaves & rebuilds geometry when necessary
-    pub fn update(self: &mut Self, frustum: &[Vector4], anim_time: f32, light_layers: &[f32;NUM_CUSTOM_LIGHT_LAYERS], bsp: &BspFile, textures: &BspMapTextures, lm: &BspLightmap, position: Vector3) {
+    pub fn update(self: &mut Self, frustum: &[Vector4], light_layers: &[f32;256], bsp: &BspFile, textures: &BspMapTextures, lm: &BspLightmap, position: Vector3) {
         self.cur_frame = self.cur_frame.wrapping_add(1);
 
         let leaf_index = bsp.calc_leaf_index(&position);
         let leaf = &bsp.leaf_lump.leaves[leaf_index as usize];
-
-        let lightstyle_frame = (anim_time * 10.0) as usize;
-        let mut light_styles = [0.0;256];
-
-        for (idx, tbl) in LIGHTSTYLES.iter().enumerate() {
-            light_styles[idx] = tbl[lightstyle_frame % tbl.len()];
-        }
-
-        for (idx, sc) in light_layers.iter().enumerate() {
-            light_styles[idx + CUSTOM_LIGHT_LAYER_START] = *sc;
-        }
 
         if leaf_index != self.prev_leaf {
              // unpack new cluster's visibility info
@@ -594,7 +539,7 @@ impl BspMapRenderer {
 
                 let face = &bsp.face_lump.faces[face_idx];
                 let tex_idx = face.texture_info as usize;
-                unpack_face(bsp, textures, &light_styles, face_idx, &mut edges, &mut self.mesh_vertices[tex_idx], &mut self.mesh_indices[tex_idx], lm);
+                unpack_face(bsp, textures, light_layers, face_idx, &mut edges, &mut self.mesh_vertices[tex_idx], &mut self.mesh_indices[tex_idx], lm);
             }
 
             let leaf_props = &bsp.leaf_sprop_lump.leaves[*i];

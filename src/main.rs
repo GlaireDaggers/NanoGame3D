@@ -1,12 +1,12 @@
 use std::{collections::HashMap, ffi::CStr, fs::File};
 
 use asset_loader::load_model;
-use bsp::{bspcommon::aabb_aabb_intersects, bspfile::BspFile, bsplightmap::BspLightmap, bsprenderer::{BspMapModelRenderer, BspMapRenderer, BspMapTextures, NUM_CUSTOM_LIGHT_LAYERS}};
+use bsp::{bspcommon::aabb_aabb_intersects, bspfile::BspFile, bsplightmap::BspLightmap, bsprenderer::{BspMapModelRenderer, BspMapRenderer, BspMapTextures}};
 use component::{camera::{Camera, FPCamera}, charactercontroller::CharacterController, door::{Door, DoorLink, DoorOpener}, fpview::FPView, light::Light, mapmodel::MapModel, playerinput::PlayerInput, rendermesh::RenderMesh, rotator::Rotator, transform3d::Transform3D, triggerable::{TriggerLink, TriggerState}};
 use hecs::{CommandBuffer, Entity, World};
 use math::{Quaternion, Vector3};
 use sdl2::controller::{Axis, Button, GameController};
-use system::{character_system::{character_apply_input_update, character_init, character_input_update, character_rotation_update, character_update}, door_system::door_system_update, flycam_system::flycam_system_update, fpcam_system::fpcam_update, fpview_system::{fpview_eye_update, fpview_input_system_update}, render_system::render_system, rotator_system::rotator_system_update, triggerable_system::trigger_link_system_update};
+use system::{character_system::{character_apply_input_update, character_init, character_input_update, character_rotation_update, character_update}, door_system::door_system_update, flycam_system::flycam_system_update, fpcam_system::fpcam_update, fpview_system::{fpview_eye_update, fpview_input_system_update}, render_system::{render_system, NUM_CUSTOM_LIGHT_LAYERS}, rotator_system::rotator_system_update, triggerable_system::trigger_link_system_update};
 
 const TICK_INTERVAL: f32 = 1.0 / 60.0;
 const MAX_TICK_ACCUM: f32 = TICK_INTERVAL * 4.0;

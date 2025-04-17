@@ -237,16 +237,38 @@ pub struct LightmapLump {
     pub lm: Vec<Color32>
 }
 
-#[derive(Clone, Copy)]
-pub struct LSHProbe {
+#[derive(Default, Clone, Copy)]
+pub struct LSHProbeSample {
     pub sh_r: Vector4,
     pub sh_g: Vector4,
     pub sh_b: Vector4,
 }
 
+#[derive(Default, Clone, Copy)]
+pub struct LSHProbe {
+    pub probes: [LSHProbeSample; 4],
+    pub styles: [u8; 4],
+}
+
 impl LSHProbe {
+    pub fn collapse(self: &Self, light_layers: &[f32]) -> LSHProbeSample {
+        let mut sh_r = Vector4::zero();
+        let mut sh_g = Vector4::zero();
+        let mut sh_b = Vector4::zero();
+
+        for i in 0..4 {
+            sh_r = sh_r + (self.probes[i].sh_r * light_layers[self.styles[i] as usize]);
+            sh_g = sh_g + (self.probes[i].sh_g * light_layers[self.styles[i] as usize]);
+            sh_b = sh_b + (self.probes[i].sh_b * light_layers[self.styles[i] as usize]);
+        }
+
+        LSHProbeSample { sh_r, sh_g, sh_b }
+    }
+}
+
+impl LSHProbeSample {
     pub fn lerp(self: &Self, b: Self, t: f32) -> Self {
-        LSHProbe {
+        LSHProbeSample {
             sh_r: (self.sh_r * (1.0 - t)) + (b.sh_r * t),
             sh_g: (self.sh_g * (1.0 - t)) + (b.sh_g * t),
             sh_b: (self.sh_b * (1.0 - t)) + (b.sh_b * t)
@@ -810,22 +832,31 @@ impl LSHGridLump {
         let mut probes = Vec::with_capacity(num_total as usize);
 
         for _ in 0..num_total {
-            let l0_rgb = read_vec3f(reader);
-            let l1_r = read_vec3f(reader);
-            let l1_g = read_vec3f(reader);
-            let l1_b = read_vec3f(reader);
+            let mut probe = LSHProbe::default();
+            reader.read_exact(&mut probe.styles).unwrap();
 
-            probes.push(LSHProbe {
-                sh_r: Vector4::new(l1_r.x, l1_r.y, l1_r.z, l0_rgb.x),
-                sh_g: Vector4::new(l1_g.x, l1_g.y, l1_g.z, l0_rgb.y),
-                sh_b: Vector4::new(l1_b.x, l1_b.y, l1_b.z, l0_rgb.z),
-            });
+            for i in 0..4 {
+                if probe.styles[i] != 255 {
+                    let l0_rgb = read_vec3f(reader);
+                    let l1_r = read_vec3f(reader);
+                    let l1_g = read_vec3f(reader);
+                    let l1_b = read_vec3f(reader);
+
+                    probe.probes[i] = LSHProbeSample {
+                        sh_r: Vector4::new(l1_r.x, l1_r.y, l1_r.z, l0_rgb.x),
+                        sh_g: Vector4::new(l1_g.x, l1_g.y, l1_g.z, l0_rgb.y),
+                        sh_b: Vector4::new(l1_b.x, l1_b.y, l1_b.z, l0_rgb.z),
+                    };
+                }
+            }
+
+            probes.push(probe);
         }
 
         LSHGridLump { grid_dist, grid_size, grid_mins, probes }
     }
 
-    pub fn sample_position(self: &Self, pos: Vector3) -> LSHProbe {
+    pub fn sample_position(self: &Self, pos: Vector3, light_layers: &[f32]) -> LSHProbeSample {
         let mut coord = (pos - self.grid_mins) / self.grid_dist;
         coord.x = coord.x.clamp(0.0, self.grid_size.x - 1.001);
         coord.y = coord.y.clamp(0.0, self.grid_size.y - 1.001);
@@ -857,14 +888,14 @@ impl LSHGridLump {
         let idx011 = cx1 + (cy2 * sx) + (cz2 * sx * sy);
         let idx111 = cx2 + (cy2 * sx) + (cz2 * sx * sy);
 
-        let sh000 = self.probes[idx000 as usize];
-        let sh100 = self.probes[idx100 as usize];
-        let sh010 = self.probes[idx010 as usize];
-        let sh110 = self.probes[idx110 as usize];
-        let sh001 = self.probes[idx001 as usize];
-        let sh101 = self.probes[idx101 as usize];
-        let sh011 = self.probes[idx011 as usize];
-        let sh111 = self.probes[idx111 as usize];
+        let sh000 = self.probes[idx000 as usize].collapse(light_layers);
+        let sh100 = self.probes[idx100 as usize].collapse(light_layers);
+        let sh010 = self.probes[idx010 as usize].collapse(light_layers);
+        let sh110 = self.probes[idx110 as usize].collapse(light_layers);
+        let sh001 = self.probes[idx001 as usize].collapse(light_layers);
+        let sh101 = self.probes[idx101 as usize].collapse(light_layers);
+        let sh011 = self.probes[idx011 as usize].collapse(light_layers);
+        let sh111 = self.probes[idx111 as usize].collapse(light_layers);
 
         // interpolate on X axis
         let shx00 = sh000.lerp(sh100, fracx);

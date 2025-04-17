@@ -1,8 +1,54 @@
 use hecs::World;
+use lazy_static::lazy_static;
 
-use crate::{bsp::{bspcommon::{aabb_frustum, coord_space_transform, extract_frustum}, bspfile::LSHProbe}, component::{camera::Camera, mapmodel::MapModel, rendermesh::RenderMesh, transform3d::Transform3D}, graphics::model::MeshVertex, math::Matrix4x4, MapData, TimeData, WindowData};
+use crate::{bsp::{bspcommon::{aabb_frustum, coord_space_transform, extract_frustum}, bspfile::LSHProbeSample}, component::{camera::Camera, mapmodel::MapModel, rendermesh::RenderMesh, transform3d::Transform3D}, graphics::model::MeshVertex, math::Matrix4x4, MapData, TimeData, WindowData};
 
-fn draw_mesh_iter(mesh: &RenderMesh, transparent: bool, cur_node: &mut usize, parent_transform: Matrix4x4, viewproj: &Matrix4x4, sh: &LSHProbe) {
+pub const NUM_CUSTOM_LIGHT_LAYERS: usize = 30;
+pub const CUSTOM_LIGHT_LAYER_START: usize = 32;
+pub const CUSTOM_LIGHT_LAYER_END: usize = CUSTOM_LIGHT_LAYER_START + NUM_CUSTOM_LIGHT_LAYERS;
+
+lazy_static! {
+    static ref LIGHTSTYLES: [Vec<f32>;13] = [
+        make_light_table(b"m"),
+        // 1 - FLICKER 1
+        make_light_table(b"mmnmmommommnonmmonqnmmo"),
+        // 2 - SLOW STRONG PULSE
+        make_light_table(b"abcdefghijklmnopqrstuvwxyzyxwvutsrqponmlkjihgfedcba"),
+        // 3 - CANDLE 1
+        make_light_table(b"mmmmmaaaaammmmmaaaaaabcdefgabcdefg"),
+        // 4 - FAST STROBE
+        make_light_table(b"mamamamamama"),
+        // 5 - GENTLE PULSE
+        make_light_table(b"jklmnopqrstuvwxyzyxwvutsrqponmlkj"),
+        // 6 - FLICKER 2
+        make_light_table(b"nmonqnmomnmomomno"),
+        // 7 - CANDLE 2
+        make_light_table(b"mmmaaaabcdefgmmmmaaaammmaamm"),
+        // 8 - CANDLE 3
+        make_light_table(b"mmmaaammmaaammmabcdefaaaammmmabcdefmmmaaaa"),
+        // 9 - SLOW STROBE
+        make_light_table(b"aaaaaaaazzzzzzzz"),
+        // 10 - FLUORESCENT FLICKER
+        make_light_table(b"mmamammmmammamamaaamammma"),
+        // 11 - SLOW PULSE, NO BLACK
+        make_light_table(b"abcdefghijklmnopqrrqponmlkjihgfedcba"),
+        // 12 - FAST PULSE
+        make_light_table(b"acegikmoqsuwyywusqomkigeca"),
+    ];
+}
+
+// convert Quake-style light animation table to float array ('a' is minimum light, 'z' is maximum light)
+fn make_light_table(data: &[u8]) -> Vec<f32> {
+    let mut output = vec![0.0;data.len()];
+
+    for i in 0..data.len() {
+        output[i] = (data[i] - 97) as f32 / 25.0;
+    }
+
+    output
+}
+
+fn draw_mesh_iter(mesh: &RenderMesh, transparent: bool, cur_node: &mut usize, parent_transform: Matrix4x4, viewproj: &Matrix4x4, sh: &LSHProbeSample) {
     let node = &mesh.mesh.nodes[*cur_node];
     let node_xform = node.transform * parent_transform;
     let mvp = node_xform * *viewproj;
@@ -68,6 +114,22 @@ pub fn render_system(time: &TimeData, window_data: &WindowData, map_data: &mut M
         .iter()
         .collect::<Vec<_>>();
 
+    // compute light layers
+    let lightstyle_frame = (time.total_time * 10.0) as usize;
+    let lightstyle_frame_lerp = (time.total_time * 10.0).fract();
+    let mut light_styles = [0.0;256];
+
+    for (idx, tbl) in LIGHTSTYLES.iter().enumerate() {
+        let a = tbl[lightstyle_frame % tbl.len()];
+        let b = tbl[(lightstyle_frame + 1) % tbl.len()];
+        light_styles[idx] = (a * (1.0 - lightstyle_frame_lerp)) + (b * lightstyle_frame_lerp);
+    }
+
+    for (idx, sc) in map_data.light_layers.iter().enumerate() {
+        light_styles[idx + CUSTOM_LIGHT_LAYER_START] = *sc;
+    }
+
+    // draw cameras
     let mut camera_index = 0;
     for (_, (transform, camera)) in cameras {
         let aspect = match camera.viewport_rect {
@@ -130,10 +192,10 @@ pub fn render_system(time: &TimeData, window_data: &WindowData, map_data: &mut M
         }
 
         // update models
-        map_data.map_model_renderer.update(&map_data.light_layers, &visible_model_indices, time.total_time);
+        map_data.map_model_renderer.update(&light_styles, &visible_model_indices);
 
         // update with new camera position
-        renderer.update(&frustum, time.total_time, &map_data.light_layers, &map_data.map, &map_data.map_textures, &map_data.map_lightmap, transform.position);
+        renderer.update(&frustum, &light_styles, &map_data.map, &map_data.map_textures, &map_data.map_lightmap, transform.position);
 
         // draw opaque map geometry
         renderer.draw_opaque(&map_data.map_textures, &map_data.map_lightmap, time.total_time, viewproj);
@@ -144,7 +206,7 @@ pub fn render_system(time: &TimeData, window_data: &WindowData, map_data: &mut M
 
         // draw opaque mesh parts
         for (_, (mesh, transform)) in &meshes {
-            let sh = map_data.map.lsh_grid_lump.sample_position(transform.position);
+            let sh = map_data.map.lsh_grid_lump.sample_position(transform.position, &light_styles);
 
             let model_transform = Matrix4x4::scale(transform.scale)
                 * Matrix4x4::rotation(transform.rotation)
@@ -166,7 +228,7 @@ pub fn render_system(time: &TimeData, window_data: &WindowData, map_data: &mut M
         // draw transparent mesh parts
         // TODO: this feels super inefficient for deep hierarchies. Maybe just avoid those?
         for (_, (mesh, transform)) in &meshes {
-            let sh = map_data.map.lsh_grid_lump.sample_position(transform.position);
+            let sh = map_data.map.lsh_grid_lump.sample_position(transform.position, &light_styles);
 
             let model_transform = Matrix4x4::scale(transform.scale)
                 * Matrix4x4::rotation(transform.rotation)
