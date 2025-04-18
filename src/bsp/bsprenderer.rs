@@ -3,6 +3,14 @@ use std::{collections::HashSet, mem::offset_of, sync::Arc};
 use crate::{asset_loader::{load_material, load_shader}, gl_checked, graphics::{buffer::Buffer, material::{Material, TextureSampler}, shader::Shader, texture::{Texture, TextureFormat}}, math::{Matrix4x4, Vector2, Vector3, Vector4}, misc::Color32};
 use super::{bspcommon::{aabb_aabb_intersects, aabb_frustum}, bspfile::{BspFile, Edge, StaticPropVertex, SURF_NODRAW, SURF_SKY, SURF_TRANS33, SURF_TRANS66}, bsplightmap::BspLightmap};
 
+// If you peruse this file, you might notice that in a lot of cases we actually update vertex data on the CPU and dynamically update the vertex buffers each frame
+// You might be wondering why we're doing this rather than doing it on the GPU in a shader
+// Normally you'd be right - in fact that was what I originally tried to do, by uploading the 256 light layers as a uniform array and packing a "light style" index into vertex attributes
+// Sadly, it turns out certain GLES2 targets don't actually support dynamic indexing of uniform arrays - it's *supposed* to be emulated as best as possible according to the spec, but some targets just don't.
+// VideoCore IV is one such target, for example
+// NanoGame3D currently takes a "least common denominator" approach for simplicity, so that means we just always take the option that supports all targets - in this case, just doing the work on the CPU.
+// Yes, that also means no GPU skinning. Such is life.
+
 fn unpack_face(bsp: &BspFile, textures: &BspMapTextures, light_styles: &[f32], face_idx: usize, edge_buffer: &mut Vec<Edge>, geo: &mut Vec<MapVertex>, index: &mut Vec<u16>, lm: &BspLightmap) {
     let face = &bsp.face_lump.faces[face_idx];
     let tex_idx = face.texture_info as usize;
@@ -331,6 +339,8 @@ impl BspMapModelRenderer {
                         vtx.lm3.z = light_layers[part.light_styles[3] as usize];
                     }
     
+                    // note: intentionally buffer orphaning to reduce sync points
+                    part.vtx_buffer.resize(part.vtx_buffer.size());
                     part.vtx_buffer.set_data(0, &part.geom);
                 }
             }
@@ -389,6 +399,8 @@ impl StaticPropMesh {
             }
         }
 
+        // note: intentionally buffer orphaning to reduce sync points
+        self.vtx_buffer.resize(self.vtx_buffer.size());
         self.vtx_buffer.set_data(0, &self.vertices);
     }
 }
@@ -590,13 +602,23 @@ impl BspMapRenderer {
                 let vtx_buf_size = (self.mesh_vertices[i].len() * size_of::<MapVertex>()) as isize;
                 let idx_buf_size = (self.mesh_indices[i].len() * size_of::<u16>()) as isize;
 
-                if self.vtx_buffers[i].size() < vtx_buf_size {
-                    self.vtx_buffers[i].resize(vtx_buf_size);
+                let new_vtx_size = if self.vtx_buffers[i].size() < vtx_buf_size {
+                    vtx_buf_size
                 }
+                else {
+                    self.vtx_buffers[i].size()
+                };
 
-                if self.idx_buffers[i].size() < idx_buf_size {
-                    self.idx_buffers[i].resize(idx_buf_size);
+                let new_idx_size = if self.idx_buffers[i].size() < idx_buf_size {
+                    idx_buf_size
                 }
+                else {
+                    self.idx_buffers[i].size()
+                };
+
+                // intentionally buffer orphaning to reduce sync points
+                self.vtx_buffers[i].resize(new_vtx_size);
+                self.idx_buffers[i].resize(new_idx_size);
 
                 self.vtx_buffers[i].set_data(0, &self.mesh_vertices[i]);
                 self.idx_buffers[i].set_data(0, &self.mesh_indices[i]);

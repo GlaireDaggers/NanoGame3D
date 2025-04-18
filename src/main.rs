@@ -123,7 +123,7 @@ impl GameState {
                         println!("worldspawn: {} = {}", key, val);
                     }
                 }
-                "prop_static" => {
+                "prop_dynamic" => {
                     let pos = parse_utils::parse_prop_vec3(&entity_data, "origin", Vector3::zero());
                     let angles = parse_utils::parse_prop_vec3(&entity_data, "angles", Vector3::zero());
                     let model_path = parse_utils::get_prop_str(&entity_data, "model", "");

@@ -474,6 +474,12 @@ impl Quaternion {
     }
 }
 
+impl Default for Quaternion {
+    fn default() -> Self {
+        Quaternion::identity()
+    }
+}
+
 impl ops::Mul<Quaternion> for Quaternion {
     type Output = Quaternion;
 
@@ -499,6 +505,22 @@ impl ops::Mul<Vector3> for Quaternion {
         let rz = rhs.z + z * self.w + (self.x * y - self.y * x);
 
         return Vector3 { x: rx, y: ry, z: rz };
+    }
+}
+
+impl ops::Mul<f32> for Quaternion {
+    type Output = Quaternion;
+
+    fn mul(self, rhs: f32) -> Quaternion {
+        return Quaternion { x: self.x * rhs, y: self.y * rhs, z: self.z * rhs, w: self.w * rhs };
+    }
+}
+
+impl ops::Add<Quaternion> for Quaternion {
+    type Output = Quaternion;
+
+    fn add(self, rhs: Quaternion) -> Quaternion {
+        return Quaternion { x: self.x + rhs.x, y: self.y + rhs.y, z: self.z + rhs.z, w: self.w + rhs.w };
     }
 }
 

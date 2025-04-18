@@ -1,10 +1,10 @@
-use std::{mem::offset_of, sync::Arc};
+use std::{collections::HashMap, mem::offset_of, sync::Arc};
 
-use gltf::{buffer::Data, Document, Mesh, Node, Primitive};
+use gltf::{buffer::Data, Animation, Document, Mesh, Node, Primitive};
 
-use crate::{asset_loader::load_material, math::{Matrix4x4, Vector2, Vector4}, misc::Color32};
+use crate::{asset_loader::load_material, math::{Matrix4x4, Quaternion, Vector2, Vector3, Vector4}, misc::Color32};
 
-use super::{buffer::Buffer, material::Material, shader::Shader};
+use super::{anim::AnimationCurve, buffer::Buffer, material::Material, shader::Shader};
 
 pub struct MeshVertex {
     pub position: Vector4,
@@ -208,10 +208,73 @@ pub struct ModelNode {
     pub transform: Matrix4x4,
 }
 
+#[derive(Default)]
+pub struct ModelAnimationChannels {
+    pub translation: Option<AnimationCurve<Vector3>>,
+    pub rotation: Option<AnimationCurve<Quaternion>>,
+    pub scale: Option<AnimationCurve<Vector3>>,
+}
+
+pub struct ModelAnimationClip {
+    pub name: String,
+    pub channels: HashMap<usize, ModelAnimationChannels>
+}
+
+impl ModelAnimationClip {
+    pub fn from_gltf(buffers: &[Data], anim: &Animation) -> Self {
+        let mut channels: HashMap<usize, ModelAnimationChannels> = HashMap::new();
+
+        for ch in anim.channels() {
+            let target_node = ch.target().node().index();
+            if !channels.contains_key(&target_node) {
+                channels.insert(target_node, ModelAnimationChannels::default());
+            }
+            let target_channels = channels.get_mut(&target_node).unwrap();
+
+            let reader = ch.reader(|buffer| Some(&buffers[buffer.index()]));
+            let keyframe_timestamps = if let Some(inputs) = reader.read_inputs() {
+                match inputs {
+                    gltf::accessor::Iter::Standard(item_iter) => {
+                        let times: Vec<f32> = item_iter.collect();
+                        times
+                    },
+                    gltf::accessor::Iter::Sparse(_) => todo!(),
+                }
+            }
+            else {
+                continue;
+            };
+
+            if let Some(outputs) = reader.read_outputs() {
+                match outputs {
+                    gltf::animation::util::ReadOutputs::Translations(iter) => {
+                        let keyframes: Vec<Vector3> = iter.map(|v| Vector3::new(v[0], v[1], v[2])).collect();
+                        target_channels.translation = Some(AnimationCurve::<Vector3>::from_gltf(ch.sampler().interpolation(), &keyframe_timestamps, &keyframes));
+                    },
+                    gltf::animation::util::ReadOutputs::Rotations(rotations) => {
+                        let keyframes: Vec<Quaternion> = rotations.into_f32().map(|v| Quaternion::new(v[0], v[1], v[2], v[3])).collect();
+                        target_channels.rotation = Some(AnimationCurve::<Quaternion>::from_gltf(ch.sampler().interpolation(), &keyframe_timestamps, &keyframes));
+                    },
+                    gltf::animation::util::ReadOutputs::Scales(iter) => {
+                        let keyframes: Vec<Vector3> = iter.map(|v| Vector3::new(v[0], v[1], v[2])).collect();
+                        target_channels.scale = Some(AnimationCurve::<Vector3>::from_gltf(ch.sampler().interpolation(), &keyframe_timestamps, &keyframes));
+                    },
+                    gltf::animation::util::ReadOutputs::MorphTargetWeights(_) => {
+                        continue;
+                    },
+                }
+            }
+        }
+
+        Self { name: anim.name().unwrap().to_string(), channels }
+    }
+}
+
 pub struct Model {
     pub meshes: Vec<MeshGroup>,
     pub materials: Vec<Arc<Material>>,
     pub nodes: Vec<ModelNode>,
+    pub animations: Vec<ModelAnimationClip>,
 }
 
 impl Model {
@@ -252,6 +315,10 @@ impl Model {
             Model::unpack_node(&node, &mut nodes);
         }
 
-        Model { meshes, materials, nodes }
+        let animations: Vec<ModelAnimationClip> = gltf.animations().map(|x| {
+            ModelAnimationClip::from_gltf(buffers, &x)
+        }).collect();
+
+        Model { meshes, materials, nodes, animations }
     }
 }
