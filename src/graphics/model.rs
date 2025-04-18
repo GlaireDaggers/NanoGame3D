@@ -204,8 +204,12 @@ impl MeshGroup {
 
 pub struct ModelNode {
     pub mesh_index: isize,
+    pub skin_index: isize,
     pub num_children: usize,
     pub transform: Matrix4x4,
+    pub rest_pos: Vector3,
+    pub rest_rot: Quaternion,
+    pub rest_scale: Vector3,
 }
 
 #[derive(Default)]
@@ -270,11 +274,21 @@ impl ModelAnimationClip {
     }
 }
 
+pub struct ModelSkinJoint {
+    pub inv_bind_xform: Matrix4x4,
+    pub node: usize,
+}
+
+pub struct ModelSkin {
+    pub joints: Vec<ModelSkinJoint>,
+}
+
 pub struct Model {
     pub meshes: Vec<MeshGroup>,
     pub materials: Vec<Arc<Material>>,
     pub nodes: Vec<ModelNode>,
     pub animations: Vec<ModelAnimationClip>,
+    pub skins: Vec<ModelSkin>
 }
 
 impl Model {
@@ -286,9 +300,25 @@ impl Model {
             -1
         };
 
+        let skin_index = if let Some(skin) = node.skin() {
+            skin.index() as isize
+        }
+        else {
+            -1
+        };
+
+        let trs = node.transform().decomposed();
         let transform = Matrix4x4 { m: node.transform().matrix() }.transposed();
 
-        nodes.push(ModelNode { mesh_index, num_children: node.children().count(), transform });
+        nodes.push(ModelNode {
+            mesh_index,
+            skin_index,
+            num_children: node.children().count(),
+            transform,
+            rest_pos: Vector3::new(trs.0[0], trs.0[1], trs.0[2]),
+            rest_rot: Quaternion::new(trs.1[0], trs.1[1], trs.1[2], trs.1[3]),
+            rest_scale: Vector3::new(trs.2[0], trs.2[1], trs.2[2]),
+        });
 
         for child in node.children() {
             Model::unpack_node(&child, nodes);
@@ -319,6 +349,21 @@ impl Model {
             ModelAnimationClip::from_gltf(buffers, &x)
         }).collect();
 
-        Model { meshes, materials, nodes, animations }
+        let skins: Vec<ModelSkin> = gltf.skins().map(|x| {
+            let reader = x.reader(|buffer| Some(&buffers[buffer.index()]));
+            let inv_bind_matrices = reader.read_inverse_bind_matrices().unwrap();
+            let joints = x.joints();
+
+            let skin_joints: Vec<ModelSkinJoint> = inv_bind_matrices.zip(joints).map(|x| {
+                ModelSkinJoint {
+                    inv_bind_xform: Matrix4x4 { m: x.0 }.transposed(),
+                    node: x.1.index()
+                }
+            }).collect();
+
+            ModelSkin { joints: skin_joints }
+        }).collect();
+
+        Model { meshes, materials, nodes, animations, skins }
     }
 }
