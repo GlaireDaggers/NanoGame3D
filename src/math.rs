@@ -65,6 +65,11 @@ impl Vector2 {
     pub fn dot(self: &Vector2, rhs: Vector2) -> f32 {
         return (self.x * rhs.x) + (self.y * rhs.y);
     }
+
+    /// Compute linear interpolation between vectors
+    pub fn lerp(v1: Self, v2: Self, t: f32) -> Self {
+        (v1 * (1.0 - t)) + (v2 * t)
+    }
 }
 
 impl ops::Add<Vector2> for Vector2 {
@@ -213,6 +218,11 @@ impl Vector3 {
             z: self.x * rhs.y - self.y * rhs.x
         };
     }
+
+    /// Compute linear interpolation between vectors
+    pub fn lerp(v1: Self, v2: Self, t: f32) -> Self {
+        (v1 * (1.0 - t)) + (v2 * t)
+    }
 }
 
 impl ops::Add<Vector3> for Vector3 {
@@ -360,6 +370,11 @@ impl Vector4 {
     pub fn dot(self: &Vector4, rhs: Vector4) -> f32 {
         return (self.x * rhs.x) + (self.y * rhs.y) + (self.z * rhs.z) + (self.w * rhs.w);
     }
+
+    /// Compute linear interpolation between vectors
+    pub fn lerp(v1: Self, v2: Self, t: f32) -> Self {
+        (v1 * (1.0 - t)) + (v2 * t)
+    }
 }
 
 impl ops::Add<Vector4> for Vector4 {
@@ -471,6 +486,46 @@ impl Quaternion {
     pub fn inverted(&self) -> Quaternion {
         let n = 1.0 / (self.x * self.x + self.y * self.y + self.z * self.z + self.w * self.w);
         return Quaternion { x: self.x * -n, y: self.y * -n, z: self.z * -n, w: self.w * n }
+    }
+
+    pub fn slerp(q1: Quaternion, q2: Quaternion, t: f32) -> Quaternion {
+        const EPSILON: f32 = 1e-6;
+
+        let cos_omega = q1.x * q2.x + q1.y * q2.y + q1.z * q2.z + q1.w * q2.w;
+
+        let (flip, cos_omega) = if cos_omega < 0.0 {
+            (true, -cos_omega)
+        }
+        else {
+            (false, cos_omega)
+        };
+
+        let (s1, s2) = if cos_omega > (1.0 - EPSILON) {
+            (1.0 - t, if flip { -t } else { t })
+        }
+        else {
+            let omega = cos_omega.acos();
+            let inv_sin_omega = 1.0 / omega.sin();
+
+            (
+                // s1
+                ((1.0 - t) * omega).sin() * inv_sin_omega,
+                // s2
+                if flip {
+                    -(t * omega).sin() * inv_sin_omega
+                }
+                else {
+                    (t * omega).sin() * inv_sin_omega
+                }
+            )
+        };
+
+        Quaternion::new(
+            s1 * q1.x + s2 * q2.x,
+            s1 * q1.y + s2 * q2.y,
+            s1 * q1.z + s2 * q2.z,
+            s1 * q1.w + s2 * q2.w
+        )
     }
 }
 
