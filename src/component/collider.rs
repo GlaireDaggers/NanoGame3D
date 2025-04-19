@@ -1,6 +1,5 @@
-use crate::math::Vector3;
+use crate::misc::AABB;
 
 pub struct ColliderBounds {
-    pub bounds_offset: Vector3,
-    pub bounds_extents: Vector3,
+    pub bounds: AABB,
 }

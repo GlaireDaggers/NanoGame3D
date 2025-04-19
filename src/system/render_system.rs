@@ -1,7 +1,8 @@
 use hecs::World;
 use lazy_static::lazy_static;
+use rayon::prelude::*;
 
-use crate::{bsp::{bspcommon::{aabb_frustum, coord_space_transform, extract_frustum}, bspfile::LSHProbeSample}, component::{camera::Camera, mapmodel::MapModel, meshpose::MeshPose, rendermesh::{RenderMesh, SkinnedMesh}, transform3d::Transform3D}, graphics::model::{MeshVertex, ModelSkin}, math::{Matrix4x4, Vector4}, MapData, TimeData, WindowData};
+use crate::{bsp::{bspcommon::{aabb_frustum, coord_space_transform, extract_frustum, transform_aabb}, bspfile::{BspFile, LSHProbeSample}, bsprenderer::BspMapRenderer}, component::{camera::Camera, mapmodel::MapModel, meshpose::MeshPose, rendermesh::{RenderMesh, SkinnedMesh}, transform3d::Transform3D}, graphics::model::{MeshVertex, ModelSkin}, math::{Matrix4x4, Vector4}, misc::AABB, MapData, TimeData, WindowData};
 
 pub const NUM_CUSTOM_LIGHT_LAYERS: usize = 30;
 pub const CUSTOM_LIGHT_LAYER_START: usize = 32;
@@ -48,7 +49,7 @@ fn make_light_table(data: &[u8]) -> Vec<f32> {
     output
 }
 
-fn draw_mesh_iter(mesh: &RenderMesh, transparent: bool, cur_node: &mut usize, parent_transform: Matrix4x4, viewproj: &Matrix4x4, sh: &LSHProbeSample) {
+fn draw_mesh_iter(renderer: &BspMapRenderer, bsp: &BspFile, frustum: &[Vector4], mesh: &RenderMesh, transparent: bool, cur_node: &mut usize, parent_transform: Matrix4x4, viewproj: &Matrix4x4, sh: &LSHProbeSample) {
     let node = &mesh.mesh.nodes[*cur_node];
     let node_xform = node.transform * parent_transform;
     let mvp = node_xform * *viewproj;
@@ -61,7 +62,8 @@ fn draw_mesh_iter(mesh: &RenderMesh, transparent: bool, cur_node: &mut usize, pa
             if let Some((vtx_buffer, idx_buffer)) = &part.buffers {
                 let mat = &mesh.mesh.materials[part.material_index];
 
-                if mat.transparent == transparent {
+                let bounds = transform_aabb(&part.bounds, node_xform);
+                if mat.transparent == transparent && aabb_frustum(&bounds, frustum) && renderer.check_vis(bsp, &bounds) {
                     mat.apply();
 
                     mat.shader.set_uniform_vec4("shR", sh.sh_r);
@@ -90,12 +92,12 @@ fn draw_mesh_iter(mesh: &RenderMesh, transparent: bool, cur_node: &mut usize, pa
 
     // draw children
     for _ in 0..node.num_children {
-        draw_mesh_iter(mesh, transparent, cur_node, node_xform, viewproj, sh);
+        draw_mesh_iter(renderer, bsp, frustum, mesh, transparent, cur_node, node_xform, viewproj, sh);
     }
 }
 
 fn do_skinning(vertices: &mut [MeshVertex], node_transforms: &[Matrix4x4], skin: &ModelSkin) {
-    for vtx in vertices {
+    let process_vtx = |vtx: &mut MeshVertex| {
         #[cfg(feature = "two_bone_per_vertex")]
         let tx = {
             let n0 = &skin.joints[vtx.joints[0] as usize];
@@ -145,6 +147,14 @@ fn do_skinning(vertices: &mut [MeshVertex], node_transforms: &[Matrix4x4], skin:
         vtx.tangent.x = tan.x;
         vtx.tangent.y = tan.y;
         vtx.tangent.z = tan.z;
+    };
+
+    #[cfg(feature = "parallel_skinning")]
+    vertices.par_iter_mut().for_each(process_vtx);
+
+    #[cfg(not(feature = "parallel_skinning"))]
+    for vtx in vertices {
+        process_vtx(vtx);
     }
 }
 
@@ -179,7 +189,7 @@ fn update_skinned_mesh_iter(mesh: &RenderMesh, pose: &MeshPose, sk: &mut Skinned
     }
 }
 
-fn draw_skinned_mesh_iter(mesh: &RenderMesh, pose: &MeshPose, sk: &SkinnedMesh, transparent: bool, cur_node: &mut usize, parent_transform: Matrix4x4, viewproj: &Matrix4x4, sh: &LSHProbeSample) {
+fn draw_skinned_mesh_iter(renderer: &BspMapRenderer, bsp: &BspFile, frustum: &[Vector4], mesh: &RenderMesh, pose: &MeshPose, sk: &SkinnedMesh, transparent: bool, cur_node: &mut usize, parent_transform: Matrix4x4, viewproj: &Matrix4x4, sh: &LSHProbeSample) {
     let node = &mesh.mesh.nodes[*cur_node];
     let node_xform = pose.pose[*cur_node] * parent_transform;
     let mvp = node_xform * *viewproj;
@@ -192,7 +202,8 @@ fn draw_skinned_mesh_iter(mesh: &RenderMesh, pose: &MeshPose, sk: &SkinnedMesh, 
             if let Some((vtx_buffer, idx_buffer)) = &part.buffers {
                 let mat = &mesh.mesh.materials[part.material_index];
 
-                if mat.transparent == transparent {
+                let bounds = transform_aabb(&part.bounds, node_xform);
+                if mat.transparent == transparent && aabb_frustum(&bounds, frustum) && renderer.check_vis(bsp, &bounds) {
                     let vtx_buffer = if node.skin_index >= 0 {
                         &sk.vtx_buffer[node.mesh_index as usize][part_idx]
                     }
@@ -228,7 +239,7 @@ fn draw_skinned_mesh_iter(mesh: &RenderMesh, pose: &MeshPose, sk: &SkinnedMesh, 
 
     // draw children
     for _ in 0..node.num_children {
-        draw_skinned_mesh_iter(mesh, pose, sk, transparent, cur_node, parent_transform, viewproj, sh);
+        draw_skinned_mesh_iter(renderer, bsp, frustum, mesh, pose, sk, transparent, cur_node, parent_transform, viewproj, sh);
     }
 }
 
@@ -332,15 +343,15 @@ pub fn render_system(time: &TimeData, window_data: &WindowData, map_data: &mut M
         let mut visible_model_indices = Vec::new();
         for (_, (model_info, model_transform)) in &mapmodels {
             let submodel = &map_data.map.submodel_lump.submodels[model_info.model_idx + 1];
-            let bounds_extents = (submodel.maxs - submodel.mins) * 0.5;
-            let bounds_center = model_transform.position + ((submodel.maxs + submodel.mins) * 0.5);
+            let submodel_bounds = AABB::min_max(submodel.mins, submodel.maxs);
+            let model_mat = Matrix4x4::scale(model_transform.scale)
+                * Matrix4x4::rotation(model_transform.rotation)
+                * Matrix4x4::translation(model_transform.position);
+            let submodel_bounds = transform_aabb(&submodel_bounds, model_mat);
 
-            let vis = aabb_frustum(bounds_center - bounds_extents, bounds_center + bounds_extents, &frustum) && renderer.check_vis(&map_data.map, bounds_center, bounds_extents);
+            let vis = aabb_frustum(&submodel_bounds, &frustum) && renderer.check_vis(&map_data.map, &submodel_bounds);
 
             if vis {
-                let model_mat = Matrix4x4::scale(model_transform.scale)
-                    * Matrix4x4::rotation(model_transform.rotation)
-                    * Matrix4x4::translation(model_transform.position);
 
                 visible_model_transforms.push(model_mat);
                 visible_model_indices.push(model_info.model_idx);
@@ -371,7 +382,7 @@ pub fn render_system(time: &TimeData, window_data: &WindowData, map_data: &mut M
             
             let mut cur_node = 0;
             while cur_node < mesh.mesh.nodes.len() {
-                draw_mesh_iter(mesh, false, &mut cur_node, model_transform, &viewproj, &sh);
+                draw_mesh_iter(&renderer, &map_data.map, &frustum, mesh, false, &mut cur_node, model_transform, &viewproj, &sh);
             }
         }
 
@@ -385,7 +396,7 @@ pub fn render_system(time: &TimeData, window_data: &WindowData, map_data: &mut M
             
             let mut cur_node = 0;
             while cur_node < mesh.mesh.nodes.len() {
-                draw_skinned_mesh_iter(mesh, pose, sk, false, &mut cur_node, model_transform, &viewproj, &sh);
+                draw_skinned_mesh_iter(&renderer, &map_data.map, &frustum, mesh, pose, sk, false, &mut cur_node, model_transform, &viewproj, &sh);
             }
         }
 
@@ -408,7 +419,7 @@ pub fn render_system(time: &TimeData, window_data: &WindowData, map_data: &mut M
             
             let mut cur_node = 0;
             while cur_node < mesh.mesh.nodes.len() {
-                draw_mesh_iter(mesh, true, &mut cur_node, model_transform, &viewproj, &sh);
+                draw_mesh_iter(&renderer, &map_data.map, &frustum, mesh, true, &mut cur_node, model_transform, &viewproj, &sh);
             }
         }
 
@@ -422,7 +433,7 @@ pub fn render_system(time: &TimeData, window_data: &WindowData, map_data: &mut M
             
             let mut cur_node = 0;
             while cur_node < mesh.mesh.nodes.len() {
-                draw_skinned_mesh_iter(mesh, pose, sk, true, &mut cur_node, model_transform, &viewproj, &sh);
+                draw_skinned_mesh_iter(&renderer, &map_data.map, &frustum, mesh, pose, sk, true, &mut cur_node, model_transform, &viewproj, &sh);
             }
         }
 

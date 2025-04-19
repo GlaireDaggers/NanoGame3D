@@ -1,4 +1,4 @@
-use crate::math::{Matrix4x4, Vector3, Vector4};
+use crate::{math::{Matrix4x4, Vector3, Vector4}, misc::AABB};
 
 pub fn coord_space_transform() -> Matrix4x4 {
     // Quake coordinate system:
@@ -19,7 +19,12 @@ pub fn coord_space_transform() -> Matrix4x4 {
     ]}
 }
 
-pub fn aabb_aabb_intersects(min_a: Vector3, max_a: Vector3, min_b: Vector3, max_b: Vector3) -> bool {
+pub fn aabb_aabb_intersects(a: &AABB, b: &AABB) -> bool {
+    let min_a = a.min();
+    let max_a = a.max();
+    let min_b = b.min();
+    let max_b = b.max();
+
     return min_a.x <= max_b.x && max_a.x >= min_b.x &&
             min_a.y <= max_b.y && max_a.y >= min_b.y &&
             min_a.z <= max_b.z && max_a.z >= min_b.z;
@@ -41,7 +46,10 @@ pub fn extract_frustum(viewproj: &Matrix4x4) -> [Vector4;6] {
     ]
 }
 
-pub fn aabb_frustum(min: Vector3, max: Vector3, frustum: &[Vector4]) -> bool {
+pub fn aabb_frustum(bounds: &AABB, frustum: &[Vector4]) -> bool {
+    let min = bounds.min();
+    let max = bounds.max();
+    
     for plane in frustum {
         if plane.dot(Vector4::new(min.x, min.y, min.z, 1.0)) <= 0.0 &&
             plane.dot(Vector4::new(max.x, min.y, min.z, 1.0)) <= 0.0 &&
@@ -59,17 +67,17 @@ pub fn aabb_frustum(min: Vector3, max: Vector3, frustum: &[Vector4]) -> bool {
 }
 
 /// Transform an AABB from local space into world space, returning center + extents
-pub fn transform_aabb(offset: Vector3, extents: Vector3, local2world: Matrix4x4) -> (Vector3, Vector3) {
+pub fn transform_aabb(bounds: &AABB, local2world: Matrix4x4) -> AABB {
     // get bounds corners in local space
     let corners = [
-        offset + Vector3::new(-extents.x, -extents.y, -extents.z),
-        offset + Vector3::new( extents.x, -extents.y, -extents.z),
-        offset + Vector3::new(-extents.x,  extents.y, -extents.z),
-        offset + Vector3::new( extents.x,  extents.y, -extents.z),
-        offset + Vector3::new(-extents.x, -extents.y,  extents.z),
-        offset + Vector3::new( extents.x, -extents.y,  extents.z),
-        offset + Vector3::new(-extents.x,  extents.y,  extents.z),
-        offset + Vector3::new( extents.x,  extents.y,  extents.z),
+        bounds.center + Vector3::new(-bounds.extents.x, -bounds.extents.y, -bounds.extents.z),
+        bounds.center + Vector3::new( bounds.extents.x, -bounds.extents.y, -bounds.extents.z),
+        bounds.center + Vector3::new(-bounds.extents.x,  bounds.extents.y, -bounds.extents.z),
+        bounds.center + Vector3::new( bounds.extents.x,  bounds.extents.y, -bounds.extents.z),
+        bounds.center + Vector3::new(-bounds.extents.x, -bounds.extents.y,  bounds.extents.z),
+        bounds.center + Vector3::new( bounds.extents.x, -bounds.extents.y,  bounds.extents.z),
+        bounds.center + Vector3::new(-bounds.extents.x,  bounds.extents.y,  bounds.extents.z),
+        bounds.center + Vector3::new( bounds.extents.x,  bounds.extents.y,  bounds.extents.z),
     ];
 
     // transform each corner to world space & get min/max extents
@@ -87,5 +95,5 @@ pub fn transform_aabb(offset: Vector3, extents: Vector3, local2world: Matrix4x4)
         max.z = max.z.max(wspace_c.z);
     }
 
-    ((max + min) * 0.5, (max - min) * 0.5)
+    AABB::min_max(min, max)
 }

@@ -4,9 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
+default = ["parallel_skinning"]
 gles2 = []
 use_etc1 = []
 two_bone_per_vertex = []
+parallel_skinning = []
 
 [dependencies]
 byteorder = "1.5.0"
@@ -19,3 +21,4 @@ rect_packer = "0.2.1"
 toml = "0.8.20"
 gltf = "1.4.1"
 basis-universal = "0.3.1"
+rayon = "1.10.0"

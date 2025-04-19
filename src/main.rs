@@ -5,6 +5,7 @@ use bsp::{bspcommon::aabb_aabb_intersects, bspfile::BspFile, bsplightmap::BspLig
 use component::{basicanim::{AnimationLoopMode, BasicAnim}, camera::{Camera, FPCamera}, charactercontroller::CharacterController, door::{Door, DoorLink, DoorOpener}, fpview::FPView, light::Light, mapmodel::MapModel, meshpose::MeshPose, playerinput::PlayerInput, rendermesh::{RenderMesh, SkinnedMesh}, rotator::Rotator, transform3d::Transform3D, triggerable::{TriggerLink, TriggerState}};
 use hecs::{CommandBuffer, Entity, World};
 use math::{Quaternion, Vector3};
+use misc::AABB;
 use sdl2::controller::{Axis, Button, GameController};
 use system::{anim_system::basic_animation_system, character_system::{character_apply_input_update, character_init, character_input_update, character_rotation_update, character_update}, door_system::door_system_update, flycam_system::flycam_system_update, fpcam_system::fpcam_update, fpview_system::{fpview_eye_update, fpview_input_system_update}, render_system::{render_system, skinning_system, NUM_CUSTOM_LIGHT_LAYERS}, rotator_system::rotator_system_update, triggerable_system::trigger_link_system_update};
 
@@ -303,7 +304,7 @@ impl GameState {
         for (e, doormodel) in &doors {
             let mut links = Vec::new();
             for (e2, doormodel2) in &doors {
-                if e2 != e && aabb_aabb_intersects(doormodel.mins, doormodel.maxs, doormodel2.mins, doormodel2.maxs) {
+                if e2 != e && aabb_aabb_intersects(&AABB::min_max(doormodel.mins, doormodel.maxs), &AABB::min_max(doormodel2.mins, doormodel2.maxs)) {
                     links.push(*e2);
                 }
             }

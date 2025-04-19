@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use hecs::Entity;
 
-use crate::{bsp::bspfile::MASK_SOLID, math::Vector3};
+use crate::{bsp::bspfile::MASK_SOLID, math::Vector3, misc::AABB};
 
 use super::bspfile::BspFile;
 
@@ -18,14 +18,14 @@ pub struct Trace {
 }
 
 impl BspFile {
-    pub fn trace_aabb(aabb_center: &Vector3, aabb_extents: &Vector3, start: &Vector3, end: &Vector3, box_extents: Option<&Vector3>, trace: &mut Trace) -> bool {
+    pub fn trace_aabb(bounds: &AABB, start: &Vector3, end: &Vector3, box_extents: Option<&Vector3>, trace: &mut Trace) -> bool {
         let planes = [
-            (Vector3::unit_x(),         aabb_center.x + aabb_extents.x),
-            (Vector3::unit_x() * -1.0,  (aabb_center.x - aabb_extents.x) * -1.0),
-            (Vector3::unit_y(),         aabb_center.y + aabb_extents.y),
-            (Vector3::unit_y() * -1.0,  (aabb_center.y - aabb_extents.y) * -1.0),
-            (Vector3::unit_z(),         aabb_center.z + aabb_extents.z),
-            (Vector3::unit_z() * -1.0,  (aabb_center.z - aabb_extents.z) * -1.0),
+            (Vector3::unit_x(),         bounds.center.x + bounds.extents.x),
+            (Vector3::unit_x() * -1.0,  (bounds.center.x - bounds.extents.x) * -1.0),
+            (Vector3::unit_y(),         bounds.center.y + bounds.extents.y),
+            (Vector3::unit_y() * -1.0,  (bounds.center.y - bounds.extents.y) * -1.0),
+            (Vector3::unit_z(),         bounds.center.z + bounds.extents.z),
+            (Vector3::unit_z() * -1.0,  (bounds.center.z - bounds.extents.z) * -1.0),
         ];
 
         let mut hit_normal = Vector3::zero();

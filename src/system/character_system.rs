@@ -1,7 +1,7 @@
 use hecs::{CommandBuffer, World};
 use lazy_static::lazy_static;
 
-use crate::{bsp::{bspcommon::transform_aabb, bspfile::{BspFile, MASK_SOLID}}, component::{charactercontroller::{CharacterController, CharacterInputState, CharacterState}, collider::ColliderBounds, fpview::FPView, mapmodel::MapModel, playerinput::PlayerInput, transform3d::Transform3D}, math::{Matrix4x4, Quaternion, Vector3, Vector4}, InputState, MapData, TimeData};
+use crate::{bsp::{bspcommon::transform_aabb, bspfile::{BspFile, MASK_SOLID}}, component::{charactercontroller::{CharacterController, CharacterInputState, CharacterState}, collider::ColliderBounds, fpview::FPView, mapmodel::MapModel, playerinput::PlayerInput, transform3d::Transform3D}, math::{Matrix4x4, Quaternion, Vector3, Vector4}, misc::AABB, InputState, MapData, TimeData};
 
 const GROUND_SLOPE_ANGLE: f32 = 45.0;
 const STEP_HEIGHT: f32 = 20.0;
@@ -121,15 +121,15 @@ pub fn character_update(time: &TimeData, map_data: &MapData, world: &mut World) 
         let center = transform.position + Vector3::new(0.0, 0.0, cc.height_offset);
         let extents = Vector3::new(cc.radius, cc.radius, cstate.height);
 
-        collider_bounds.push((*ent, center, extents));
+        collider_bounds.push((*ent, AABB::center_extents(center, extents)));
     }
     for (ent, (cbounds, transform)) in &colliders {
         let local2world = Matrix4x4::scale(transform.scale)
             * Matrix4x4::rotation(transform.rotation)
             * Matrix4x4::translation(transform.position);
 
-        let (center, extents) = transform_aabb(cbounds.bounds_offset, cbounds.bounds_extents, local2world);
-        collider_bounds.push((*ent, center, extents));
+        let bounds = transform_aabb(&cbounds.bounds, local2world);
+        collider_bounds.push((*ent, bounds));
     }
 
     // update character physics
@@ -172,12 +172,12 @@ pub fn character_update(time: &TimeData, map_data: &MapData, world: &mut World) 
                 }
             }
 
-            for (e, other_center, other_extents) in &collider_bounds {
+            for (e, other_bounds) in &collider_bounds {
                 if self_ent == *e {
                     continue;
                 }
 
-                if BspFile::trace_aabb(&other_center, &other_extents, start, end, Some(box_extents), &mut trace) {
+                if BspFile::trace_aabb(other_bounds, start, end, Some(box_extents), &mut trace) {
                     trace.entity = Some(*e);
                 }
             }

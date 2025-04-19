@@ -1,6 +1,6 @@
 use std::{collections::HashSet, mem::offset_of, sync::Arc};
 
-use crate::{asset_loader::{load_material, load_shader}, gl_checked, graphics::{buffer::Buffer, material::{Material, TextureSampler}, shader::Shader, texture::{Texture, TextureFormat}}, math::{Matrix4x4, Vector2, Vector3, Vector4}, misc::Color32};
+use crate::{asset_loader::{load_material, load_shader}, gl_checked, graphics::{buffer::Buffer, material::{Material, TextureSampler}, shader::Shader, texture::{Texture, TextureFormat}}, math::{Matrix4x4, Vector2, Vector3, Vector4}, misc::{Color32, AABB}};
 use super::{bspcommon::{aabb_aabb_intersects, aabb_frustum}, bspfile::{BspFile, Edge, StaticPropVertex, SURF_NODRAW, SURF_SKY, SURF_TRANS33, SURF_TRANS66}, bsplightmap::BspLightmap};
 
 // If you peruse this file, you might notice that in a lot of cases we actually update vertex data on the CPU and dynamically update the vertex buffers each frame
@@ -526,7 +526,7 @@ impl BspMapRenderer {
 
         let node = &bsp.node_lump.nodes[cur_node as usize];
 
-        if !aabb_frustum(node._bbox_min, node._bbox_max, frustum) {
+        if !aabb_frustum(&&AABB::min_max(node._bbox_min, node._bbox_max), frustum) {
             return;
         }
 
@@ -626,35 +626,32 @@ impl BspMapRenderer {
         }
     }
 
-    fn get_bounds_corners(center: Vector3, extents: Vector3) -> [Vector3;8] {
+    fn get_bounds_corners(bounds: &AABB) -> [Vector3;8] {
         [
-            center + Vector3::new(-extents.x, -extents.y, -extents.z),
-            center + Vector3::new( extents.x, -extents.y, -extents.z),
-            center + Vector3::new(-extents.x,  extents.y, -extents.z),
-            center + Vector3::new( extents.x,  extents.y, -extents.z),
-            center + Vector3::new(-extents.x, -extents.y,  extents.z),
-            center + Vector3::new( extents.x, -extents.y,  extents.z),
-            center + Vector3::new(-extents.x,  extents.y,  extents.z),
-            center + Vector3::new( extents.x,  extents.y,  extents.z),
+            bounds.center + Vector3::new(-bounds.extents.x, -bounds.extents.y, -bounds.extents.z),
+            bounds.center + Vector3::new( bounds.extents.x, -bounds.extents.y, -bounds.extents.z),
+            bounds.center + Vector3::new(-bounds.extents.x,  bounds.extents.y, -bounds.extents.z),
+            bounds.center + Vector3::new( bounds.extents.x,  bounds.extents.y, -bounds.extents.z),
+            bounds.center + Vector3::new(-bounds.extents.x, -bounds.extents.y,  bounds.extents.z),
+            bounds.center + Vector3::new( bounds.extents.x, -bounds.extents.y,  bounds.extents.z),
+            bounds.center + Vector3::new(-bounds.extents.x,  bounds.extents.y,  bounds.extents.z),
+            bounds.center + Vector3::new( bounds.extents.x,  bounds.extents.y,  bounds.extents.z),
         ]
     }
 
-    fn check_vis_leaf(self: &Self, bsp: &BspFile, leaf_index: usize, center: Vector3, extents: Vector3) -> bool {
+    fn check_vis_leaf(self: &Self, bsp: &BspFile, leaf_index: usize, bounds: &AABB) -> bool {
         if !self.visible_leaves.contains(&leaf_index) {
             return false;
         }
 
-        let min = center - extents;
-        let max = center + extents;
-
         let leaf = &bsp.leaf_lump.leaves[leaf_index];
 
-        return aabb_aabb_intersects(min, max, leaf.bbox_min, leaf.bbox_max);
+        return aabb_aabb_intersects(bounds, &AABB::min_max(leaf.bbox_min, leaf.bbox_max));
     }
 
-    fn check_vis_recursive(self: &Self, bsp: &BspFile, node_index: i32, center: Vector3, extents: Vector3, corners: &[Vector3;8]) -> bool {
+    fn check_vis_recursive(self: &Self, bsp: &BspFile, node_index: i32, bounds: &AABB, corners: &[Vector3;8]) -> bool {
         if node_index < 0 {
-            return self.check_vis_leaf(bsp, (-node_index - 1) as usize, center, extents);
+            return self.check_vis_leaf(bsp, (-node_index - 1) as usize, bounds);
         }
 
         let node = &bsp.node_lump.nodes[node_index as usize];
@@ -676,13 +673,13 @@ impl BspMapRenderer {
         }
 
         if dmax >= 0.0 {
-            if self.check_vis_recursive(bsp, node.front_child, center, extents, corners) {
+            if self.check_vis_recursive(bsp, node.front_child, bounds, corners) {
                 return true;
             }
         }
 
         if dmin <= 0.0 {
-            if self.check_vis_recursive(bsp, node.back_child, center, extents, corners) {
+            if self.check_vis_recursive(bsp, node.back_child, bounds, corners) {
                 return true;
             }
         }
@@ -690,9 +687,9 @@ impl BspMapRenderer {
         return false;
     }
 
-    pub fn check_vis(self: &Self, bsp: &BspFile, center: Vector3, extents: Vector3) -> bool {
-        let corners = Self::get_bounds_corners(center, extents);
-        return self.check_vis_recursive(bsp, 0, center, extents, &corners);
+    pub fn check_vis(self: &Self, bsp: &BspFile, bounds: &AABB) -> bool {
+        let corners = Self::get_bounds_corners(bounds);
+        return self.check_vis_recursive(bsp, 0, bounds, &corners);
     }
 
     pub fn is_leaf_visible(self: &Self, leaf_index: usize) -> bool {

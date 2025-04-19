@@ -1,3 +1,5 @@
+use crate::math::Vector3;
+
 #[derive(Default, Clone, Copy)]
 pub struct Color32 {
     pub r: u8,
@@ -23,5 +25,37 @@ pub struct Rectangle {
 impl Rectangle {
     pub fn new(x: i32, y: i32, w: i32, h: i32) -> Rectangle {
         Rectangle { x, y, w, h }
+    }
+}
+
+#[derive(Default, Clone, Copy)]
+pub struct AABB {
+    pub center: Vector3,
+    pub extents: Vector3,
+}
+
+impl AABB {
+    pub fn center_extents(center: Vector3, extents: Vector3) -> AABB {
+        AABB { center, extents }
+    }
+
+    pub fn min_max(min: Vector3, max: Vector3) -> AABB {
+        AABB { center: (min + max) * 0.5, extents: (max - min) * 0.5 }
+    }
+
+    pub fn inflate(self: Self, amount: Vector3) -> AABB {
+        AABB { center: self.center, extents: self.extents + amount }
+    }
+    
+    pub fn with_extents(self: Self, extents: Vector3) -> AABB {
+        AABB { center: self.center, extents: extents }
+    }
+
+    pub fn min(self: &Self) -> Vector3 {
+        self.center - self.extents
+    }
+
+    pub fn max(self: &Self) -> Vector3 {
+        self.center + self.extents
     }
 }

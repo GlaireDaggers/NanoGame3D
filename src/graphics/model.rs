@@ -2,7 +2,7 @@ use std::{collections::HashMap, mem::offset_of, sync::Arc};
 
 use gltf::{buffer::Data, Animation, Document, Mesh, Node, Primitive};
 
-use crate::{asset_loader::load_material, math::{Matrix4x4, Quaternion, Vector2, Vector3, Vector4}, misc::Color32};
+use crate::{asset_loader::load_material, math::{Matrix4x4, Quaternion, Vector2, Vector3, Vector4}, misc::{Color32, AABB}};
 
 use super::{anim::AnimationCurve, buffer::Buffer, material::Material, shader::Shader};
 
@@ -47,6 +47,7 @@ impl MeshVertex {
 
 pub struct MeshPart {
     pub material_index: usize,
+    pub bounds: AABB,
     pub winding: gl::types::GLenum,
     pub vertices: Vec<MeshVertex>,
     pub indices: Vec<u16>,
@@ -63,6 +64,7 @@ impl MeshPart {
             indices: Vec::new(),
             topology,
             buffers: None,
+            bounds: AABB::default(),
         }
     }
 
@@ -169,10 +171,16 @@ impl MeshPart {
             _ => panic!("Unsupported GLTF primitive: {:?}", primitive.mode())
         };
 
+        let bounds = primitive.bounding_box();
+        let bounds_min = Vector3::new(bounds.min[0], bounds.min[1], bounds.min[2]);
+        let bounds_max = Vector3::new(bounds.max[0], bounds.max[1], bounds.max[2]);
+        let bounds = AABB::min_max(bounds_min, bounds_max);
+
         let mut mesh = MeshPart::new(topology);
         mesh.material_index = primitive.material().index().unwrap();
         mesh.vertices = vertices;
         mesh.indices = indices;
+        mesh.bounds = bounds.with_extents(bounds.extents * 1.25); // inflate the bounds a bit since skinned meshes can end up with parts that move outside the initial bounds
         mesh.apply();
 
         mesh
