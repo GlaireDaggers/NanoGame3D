@@ -4,7 +4,7 @@ use gltf::{buffer::Data, Animation, Document, Mesh, Node, Primitive};
 
 use crate::{asset_loader::load_material, math::{Matrix4x4, Quaternion, Vector2, Vector3, Vector4}, misc::{Color32, AABB}};
 
-use super::{anim::AnimationCurve, buffer::Buffer, material::Material, shader::Shader};
+use super::{anim::{QuaternionCurve, Vector3Curve}, buffer::Buffer, material::Material, shader::Shader};
 
 #[derive(Default, Clone, Copy)]
 pub struct MeshVertex {
@@ -242,9 +242,9 @@ pub struct ModelNode {
 
 #[derive(Default)]
 pub struct ModelAnimationChannels {
-    pub translation: Option<AnimationCurve<Vector3>>,
-    pub rotation: Option<AnimationCurve<Quaternion>>,
-    pub scale: Option<AnimationCurve<Vector3>>,
+    pub translation: Option<Vector3Curve>,
+    pub rotation: Option<QuaternionCurve>,
+    pub scale: Option<Vector3Curve>,
 }
 
 pub struct ModelAnimationClip {
@@ -285,15 +285,15 @@ impl ModelAnimationClip {
                 match outputs {
                     gltf::animation::util::ReadOutputs::Translations(iter) => {
                         let keyframes: Vec<Vector3> = iter.map(|v| Vector3::new(v[0], v[1], v[2])).collect();
-                        target_channels.translation = Some(AnimationCurve::<Vector3>::from_gltf(ch.sampler().interpolation(), &keyframe_timestamps, &keyframes));
+                        target_channels.translation = Some(Vector3Curve::from_gltf(ch.sampler().interpolation(), &keyframe_timestamps, &keyframes));
                     },
                     gltf::animation::util::ReadOutputs::Rotations(rotations) => {
                         let keyframes: Vec<Quaternion> = rotations.into_f32().map(|v| Quaternion::new(v[0], v[1], v[2], v[3])).collect();
-                        target_channels.rotation = Some(AnimationCurve::<Quaternion>::from_gltf(ch.sampler().interpolation(), &keyframe_timestamps, &keyframes));
+                        target_channels.rotation = Some(QuaternionCurve::from_gltf(ch.sampler().interpolation(), &keyframe_timestamps, &keyframes));
                     },
                     gltf::animation::util::ReadOutputs::Scales(iter) => {
                         let keyframes: Vec<Vector3> = iter.map(|v| Vector3::new(v[0], v[1], v[2])).collect();
-                        target_channels.scale = Some(AnimationCurve::<Vector3>::from_gltf(ch.sampler().interpolation(), &keyframe_timestamps, &keyframes));
+                        target_channels.scale = Some(Vector3Curve::from_gltf(ch.sampler().interpolation(), &keyframe_timestamps, &keyframes));
                     },
                     gltf::animation::util::ReadOutputs::MorphTargetWeights(_) => {
                         continue;
