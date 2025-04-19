@@ -2,11 +2,11 @@ use std::{collections::HashMap, ffi::CStr, fs::File};
 
 use asset_loader::load_model;
 use bsp::{bspcommon::aabb_aabb_intersects, bspfile::BspFile, bsplightmap::BspLightmap, bsprenderer::{BspMapModelRenderer, BspMapRenderer, BspMapTextures}};
-use component::{camera::{Camera, FPCamera}, charactercontroller::CharacterController, door::{Door, DoorLink, DoorOpener}, fpview::FPView, light::Light, mapmodel::MapModel, playerinput::PlayerInput, rendermesh::RenderMesh, rotator::Rotator, transform3d::Transform3D, triggerable::{TriggerLink, TriggerState}};
+use component::{basicanim::{AnimationLoopMode, BasicAnim}, camera::{Camera, FPCamera}, charactercontroller::CharacterController, door::{Door, DoorLink, DoorOpener}, fpview::FPView, light::Light, mapmodel::MapModel, meshpose::MeshPose, playerinput::PlayerInput, rendermesh::{RenderMesh, SkinnedMesh}, rotator::Rotator, transform3d::Transform3D, triggerable::{TriggerLink, TriggerState}};
 use hecs::{CommandBuffer, Entity, World};
 use math::{Quaternion, Vector3};
 use sdl2::controller::{Axis, Button, GameController};
-use system::{character_system::{character_apply_input_update, character_init, character_input_update, character_rotation_update, character_update}, door_system::door_system_update, flycam_system::flycam_system_update, fpcam_system::fpcam_update, fpview_system::{fpview_eye_update, fpview_input_system_update}, render_system::{render_system, NUM_CUSTOM_LIGHT_LAYERS}, rotator_system::rotator_system_update, triggerable_system::trigger_link_system_update};
+use system::{anim_system::basic_animation_system, character_system::{character_apply_input_update, character_init, character_input_update, character_rotation_update, character_update}, door_system::door_system_update, flycam_system::flycam_system_update, fpcam_system::fpcam_update, fpview_system::{fpview_eye_update, fpview_input_system_update}, render_system::{render_system, skinning_system, NUM_CUSTOM_LIGHT_LAYERS}, rotator_system::rotator_system_update, triggerable_system::trigger_link_system_update};
 
 const TICK_INTERVAL: f32 = 1.0 / 60.0;
 const MAX_TICK_ACCUM: f32 = TICK_INTERVAL * 4.0;
@@ -335,9 +335,13 @@ impl GameState {
         ));
 
         // test static model entity
+        let dragon_mesh = load_model("content/models/dragon-2_80.glb").unwrap();
         let test_model = world.spawn((
             Transform3D::default().with_position(Vector3::new(0.0, 0.0, 50.0)).with_scale(Vector3::new(100.0, 100.0, 100.0)),
-            RenderMesh::new(load_model("content/models/dragon-2_80.glb").unwrap()),
+            RenderMesh::new(dragon_mesh.clone()),
+            MeshPose::init(&dragon_mesh),
+            SkinnedMesh::new(&dragon_mesh),
+            BasicAnim::new(dragon_mesh.get_animation_id("walk").unwrap(), AnimationLoopMode::Wrap),
             Rotator { rot_axis: Vector3::unit_z(), rot_speed: 45.0_f32.to_radians() }
         ));
 
@@ -391,6 +395,9 @@ impl GameState {
             character_update(&self.time_data, map_data, &mut self.world);
             flycam_system_update(&input_state, &self.time_data, &map_data.map, &mut self.world);
             fpcam_update(&mut self.world);
+
+            basic_animation_system(&self.time_data, &mut self.world);
+            skinning_system(&mut self.world);
         }
     }
 

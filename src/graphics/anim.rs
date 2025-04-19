@@ -80,6 +80,7 @@ impl<T> AnimationCurve<T> where T : Default + Clone + Copy + std::ops::Add<Outpu
             if time <= self.curve_points[i].time {
                 lhs = &self.curve_points[i - 1];
                 rhs = &self.curve_points[i];
+                break;
             }
         }
 
@@ -91,6 +92,10 @@ impl<T> AnimationCurve<T> where T : Default + Clone + Copy + std::ops::Add<Outpu
             AnimationCurveInterpolationMode::Linear => Self::lerp(lhs.value, rhs.value, nt),
             AnimationCurveInterpolationMode::Cubic => Self::lerp_cubic(lhs.value, rhs.value, lhs.tangent_out, rhs.tangent_in, nt)
         }
+    }
+
+    pub fn duration(self: &Self) -> f32 {
+        return self.curve_points[self.curve_points.len() - 1].time;
     }
 
     fn lerp(lhs: T, rhs: T, time: f32) -> T {

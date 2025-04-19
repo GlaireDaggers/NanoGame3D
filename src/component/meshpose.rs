@@ -2,14 +2,14 @@ use std::sync::Arc;
 
 use crate::{graphics::model::{Model, ModelAnimationClip}, math::Matrix4x4};
 
-pub struct ModelPose {
+pub struct MeshPose {
     // array of one object-space transform per node in hierarchy
     pub pose : Vec<Matrix4x4>
 }
 
-impl ModelPose {
-    pub fn init(model: &Arc<Model>) -> ModelPose {
-        ModelPose { pose: vec![Matrix4x4::identity();model.nodes.len()] }
+impl MeshPose {
+    pub fn init(mesh: &Arc<Model>) -> MeshPose {
+        MeshPose { pose: vec![Matrix4x4::identity();mesh.nodes.len()] }
     }
 
     fn sample_node(self: &mut Self, model: &Arc<Model>, parent_xform: Matrix4x4, node_idx: &mut usize, anim: &ModelAnimationClip, time: f32) {
@@ -49,7 +49,7 @@ impl ModelPose {
         *node_idx += 1;
 
         for _ in 0..node.num_children {
-            self.sample_node(model, parent_xform, node_idx, anim, time);
+            self.sample_node(model, node_xform, node_idx, anim, time);
         }
     }
 

@@ -6,6 +6,7 @@ use crate::{asset_loader::load_material, math::{Matrix4x4, Quaternion, Vector2, 
 
 use super::{anim::AnimationCurve, buffer::Buffer, material::Material, shader::Shader};
 
+#[derive(Default, Clone, Copy)]
 pub struct MeshVertex {
     pub position: Vector4,
     pub normal: Vector4,
@@ -13,8 +14,8 @@ pub struct MeshVertex {
     pub texcoord0: Vector2,
     pub texcoord1: Vector2,
     pub color: Color32,
-    pub joints: [u8;2],
-    pub weights: [u8;2],
+    pub joints: [u8;4],
+    pub weights: [u8;4],
 }
 
 impl MeshVertex {
@@ -25,8 +26,6 @@ impl MeshVertex {
         let texcoord0 = shader.get_attribute_location("in_texcoord0");
         let texcoord1 = shader.get_attribute_location("in_texcoord1");
         let color = shader.get_attribute_location("in_color");
-        let joints = shader.get_attribute_location("in_joints");
-        let weights = shader.get_attribute_location("in_weights");
 
         unsafe {
             gl::EnableVertexAttribArray(position);
@@ -35,8 +34,6 @@ impl MeshVertex {
             gl::EnableVertexAttribArray(texcoord0);
             gl::EnableVertexAttribArray(texcoord1);
             gl::EnableVertexAttribArray(color);
-            gl::EnableVertexAttribArray(joints);
-            gl::EnableVertexAttribArray(weights);
 
             gl::VertexAttribPointer(position, 4, gl::FLOAT, gl::FALSE, size_of::<MeshVertex>() as i32, offset_of!(MeshVertex, position) as *const _);
             gl::VertexAttribPointer(normal, 4, gl::FLOAT, gl::FALSE, size_of::<MeshVertex>() as i32, offset_of!(MeshVertex, normal) as *const _);
@@ -44,8 +41,6 @@ impl MeshVertex {
             gl::VertexAttribPointer(texcoord0, 2, gl::FLOAT, gl::FALSE, size_of::<MeshVertex>() as i32, offset_of!(MeshVertex, texcoord0) as *const _);
             gl::VertexAttribPointer(texcoord1, 2, gl::FLOAT, gl::FALSE, size_of::<MeshVertex>() as i32, offset_of!(MeshVertex, texcoord1) as *const _);
             gl::VertexAttribPointer(color, 4, gl::UNSIGNED_BYTE, gl::TRUE, size_of::<MeshVertex>() as i32, offset_of!(MeshVertex, color) as *const _);
-            gl::VertexAttribPointer(joints, 2, gl::UNSIGNED_BYTE, gl::FALSE, size_of::<MeshVertex>() as i32, offset_of!(MeshVertex, joints) as *const _);
-            gl::VertexAttribPointer(weights, 2, gl::UNSIGNED_BYTE, gl::TRUE, size_of::<MeshVertex>() as i32, offset_of!(MeshVertex, weights) as *const _);
         }
     }
 }
@@ -77,18 +72,16 @@ impl MeshPart {
         let positions = reader.read_positions().unwrap();
         let mut vertices = Vec::new();
 
-        // GLTF -> NG3D: (.x, -.z, .y)
-
         for pos in positions {
             let vtx = MeshVertex {
-                position: Vector4::new(pos[0], -pos[2], pos[1], 1.0),
+                position: Vector4::new(pos[0], pos[1], pos[2], 1.0),
                 normal: Vector4::zero(),
                 tangent: Vector4::zero(),
                 texcoord0: Vector2::zero(),
                 texcoord1: Vector2::zero(),
                 color: Color32::new(255, 255, 255, 255),
-                joints: [0, 0],
-                weights: [0, 0],
+                joints: [0, 0, 0, 0],
+                weights: [0, 0, 0, 0],
             };
 
             vertices.push(vtx);
@@ -96,13 +89,13 @@ impl MeshPart {
 
         if let Some(normals) = reader.read_normals() {
             for (idx, val) in normals.enumerate() {
-                vertices[idx].normal = Vector4::new(val[0], -val[2], val[1], 0.0);
+                vertices[idx].normal = Vector4::new(val[0], val[1], val[2], 0.0);
             }
         }
 
         if let Some(tangents) = reader.read_tangents() {
             for (idx, val) in tangents.enumerate() {
-                vertices[idx].tangent = Vector4::new(val[0], -val[2], val[1], 0.0);
+                vertices[idx].tangent = Vector4::new(val[0], val[1], val[2], 0.0);
             }
         }
 
@@ -128,13 +121,40 @@ impl MeshPart {
             for (idx, val) in joints.into_u16().enumerate() {
                 vertices[idx].joints[0] = val[0] as u8;
                 vertices[idx].joints[1] = val[1] as u8;
+                vertices[idx].joints[2] = val[2] as u8;
+                vertices[idx].joints[3] = val[3] as u8;
             }
         }
 
         if let Some(weights) = reader.read_weights(0) {
             for (idx, val) in weights.into_u8().enumerate() {
-                vertices[idx].weights[0] = val[0] as u8;
-                vertices[idx].weights[1] = val[1] as u8;
+                #[cfg(feature = "two_bone_per_vertex")]
+                {
+                    // sort weights
+                    let mut weights = val.iter().zip(vertices[idx].joints).collect::<Vec<_>>();
+                    weights.sort_by_key(|x| x.0);
+
+                    // pick the two highest weights, re-normalize
+                    let weight0 = *weights[3].0 as f32;
+                    let weight1 = *weights[2].0 as f32;
+                    let weight_total = weight0 + weight1;
+                    let weight0 = weight0 / weight_total;
+                    let weight1 = weight1 / weight_total;
+
+                    vertices[idx].weights[0] = (weight0 * 255.0) as u8;
+                    vertices[idx].weights[1] = (weight1 * 255.0) as u8;
+
+                    vertices[idx].joints[0] = weights[3].1;
+                    vertices[idx].joints[1] = weights[2].1;
+                }
+
+                #[cfg(not(feature = "two_bone_per_vertex"))]
+                {
+                    vertices[idx].weights[0] = val[0] as u8;
+                    vertices[idx].weights[1] = val[1] as u8;
+                    vertices[idx].weights[2] = val[2] as u8;
+                    vertices[idx].weights[3] = val[3] as u8;
+                }
             }
         }
 
@@ -221,15 +241,18 @@ pub struct ModelAnimationChannels {
 
 pub struct ModelAnimationClip {
     pub name: String,
+    pub duration: f32,
     pub channels: HashMap<usize, ModelAnimationChannels>
 }
 
 impl ModelAnimationClip {
-    pub fn from_gltf(buffers: &[Data], anim: &Animation) -> Self {
+    pub fn from_gltf(buffers: &[Data], nodemap: &HashMap<usize, usize>, anim: &Animation) -> Self {
         let mut channels: HashMap<usize, ModelAnimationChannels> = HashMap::new();
 
+        let mut duration: f32 = 0.0;
+
         for ch in anim.channels() {
-            let target_node = ch.target().node().index();
+            let target_node = nodemap[&ch.target().node().index()];
             if !channels.contains_key(&target_node) {
                 channels.insert(target_node, ModelAnimationChannels::default());
             }
@@ -240,6 +263,7 @@ impl ModelAnimationClip {
                 match inputs {
                     gltf::accessor::Iter::Standard(item_iter) => {
                         let times: Vec<f32> = item_iter.collect();
+                        duration = duration.max(times[times.len() - 1]);
                         times
                     },
                     gltf::accessor::Iter::Sparse(_) => todo!(),
@@ -270,7 +294,7 @@ impl ModelAnimationClip {
             }
         }
 
-        Self { name: anim.name().unwrap().to_string(), channels }
+        Self { name: anim.name().unwrap().to_string(), duration, channels }
     }
 }
 
@@ -284,6 +308,7 @@ pub struct ModelSkin {
 }
 
 pub struct Model {
+    pub root_transform: Matrix4x4,
     pub meshes: Vec<MeshGroup>,
     pub materials: Vec<Arc<Material>>,
     pub nodes: Vec<ModelNode>,
@@ -292,7 +317,7 @@ pub struct Model {
 }
 
 impl Model {
-    fn unpack_node(node: &Node, nodes: &mut Vec<ModelNode>) {
+    fn unpack_node(node: &Node, nodes: &mut Vec<ModelNode>, nodemap: &mut HashMap<usize, usize>) {
         let mesh_index = if let Some(mesh) = node.mesh() {
             mesh.index() as isize
         }
@@ -308,7 +333,9 @@ impl Model {
         };
 
         let trs = node.transform().decomposed();
-        let transform = Matrix4x4 { m: node.transform().matrix() }.transposed();
+        let transform = Matrix4x4 { m: node.transform().matrix() };
+
+        nodemap.insert(node.index(), nodes.len());
 
         nodes.push(ModelNode {
             mesh_index,
@@ -321,7 +348,7 @@ impl Model {
         });
 
         for child in node.children() {
-            Model::unpack_node(&child, nodes);
+            Model::unpack_node(&child, nodes, nodemap);
         }
     }
 
@@ -340,13 +367,14 @@ impl Model {
         // unpack nodes
         let scene = gltf.default_scene().unwrap();
         let mut nodes = Vec::new();
+        let mut nodemap = HashMap::new();
 
         for node in scene.nodes() {
-            Model::unpack_node(&node, &mut nodes);
+            Model::unpack_node(&node, &mut nodes, &mut nodemap);
         }
 
         let animations: Vec<ModelAnimationClip> = gltf.animations().map(|x| {
-            ModelAnimationClip::from_gltf(buffers, &x)
+            ModelAnimationClip::from_gltf(buffers, &nodemap, &x)
         }).collect();
 
         let skins: Vec<ModelSkin> = gltf.skins().map(|x| {
@@ -356,14 +384,38 @@ impl Model {
 
             let skin_joints: Vec<ModelSkinJoint> = inv_bind_matrices.zip(joints).map(|x| {
                 ModelSkinJoint {
-                    inv_bind_xform: Matrix4x4 { m: x.0 }.transposed(),
-                    node: x.1.index()
+                    inv_bind_xform: Matrix4x4 { m: x.0 },
+                    node: nodemap[&x.1.index()]
                 }
             }).collect();
 
             ModelSkin { joints: skin_joints }
         }).collect();
 
-        Model { meshes, materials, nodes, animations, skins }
+        // GLTF -> NG3D: (.x, -.z, .y)
+
+        Model {
+            root_transform: Matrix4x4 { m: [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, -1.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0]
+            ]},
+            meshes,
+            materials,
+            nodes,
+            animations,
+            skins
+        }
+    }
+
+    pub fn get_animation_id(self: &Self, name: &str) -> Result<usize, ()> {
+        for (idx, anim) in self.animations.iter().enumerate() {
+            if anim.name == name {
+                return Ok(idx);
+            }
+        }
+
+        return Err(());
     }
 }

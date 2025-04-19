@@ -6,6 +6,7 @@ edition = "2021"
 [features]
 gles2 = []
 use_etc1 = []
+two_bone_per_vertex = []
 
 [dependencies]
 byteorder = "1.5.0"
