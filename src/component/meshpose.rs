@@ -26,10 +26,10 @@ impl MeshPose {
         }
     }
 
-    fn sample_node_local(self: &mut Self, model: &Arc<Model>, node_idx: usize, anim: &ModelAnimationClip, time: f32, blend_mode: PoseBlendMode, amount: f32) {
+    fn sample_pose(model: &Arc<Model>, anim: &ModelAnimationClip, time: f32, node_idx: usize) -> (Vector3, Quaternion, Vector3) {
         let node = &model.nodes[node_idx];
 
-        let node_xform = if let Some(ch) = anim.channels.get(&node_idx) {
+        if let Some(ch) = anim.channels.get(&node_idx) {
             let position = if let Some(curve) = &ch.translation {
                 curve.sample(time)
             }
@@ -55,7 +55,11 @@ impl MeshPose {
         }
         else {
             (node.rest_pos, node.rest_rot, node.rest_scale)
-        };
+        }
+    }
+
+    fn sample_node_local(self: &mut Self, model: &Arc<Model>, node_idx: usize, anim: &ModelAnimationClip, time: f32, blend_mode: PoseBlendMode, amount: f32) {
+        let node_xform = Self::sample_pose(model, anim, time, node_idx);
 
         match blend_mode {
             PoseBlendMode::Replace => {
@@ -73,10 +77,27 @@ impl MeshPose {
                 self.local_pose[node_idx] = stored_pose;
             }
             PoseBlendMode::Add => {
+                // note: for additive poses, we actually need to also sample the first frame of the animation,
+                // and calculate the current frame's offset relative to that
+                // this way, the first frame is effectively treated as a "reference pose",
+                // and the offset from that reference is what gets additively applied to the current pose
+
+                let ref_pose = Self::sample_pose(model, anim, 0.0, node_idx);
+                let pos_offset = node_xform.0 - ref_pose.0;
+                let rot_offset = node_xform.1 * ref_pose.1.inverted();
+                let scale_offset = node_xform.2 / ref_pose.2;
+
+                // note: first frame needs a non-zero scale, otherwise we can't compute a relative scale value
+                if ref_pose.2.x.abs() <= f32::EPSILON || 
+                    ref_pose.2.y.abs() <= f32::EPSILON ||
+                    ref_pose.2.z.abs() <= f32::EPSILON {
+                    println!("INVALID REF SCALE IN ADDITIVE ANIMATION!");
+                }
+
                 let mut stored_pose = self.local_pose[node_idx];
-                stored_pose.position = stored_pose.position + (node_xform.0 * amount);
-                stored_pose.rotation = stored_pose.rotation * Quaternion::slerp(Quaternion::identity(), node_xform.1, amount);
-                stored_pose.scale = stored_pose.scale * Vector3::lerp(Vector3::new(1.0, 1.0, 1.0), node_xform.2, amount);
+                stored_pose.position = stored_pose.position + (pos_offset * amount);
+                stored_pose.rotation = stored_pose.rotation * Quaternion::slerp(Quaternion::identity(), rot_offset, amount);
+                stored_pose.scale = stored_pose.scale * Vector3::lerp(Vector3::new(1.0, 1.0, 1.0), scale_offset, amount);
 
                 self.local_pose[node_idx] = stored_pose;
             }

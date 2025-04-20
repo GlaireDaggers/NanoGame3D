@@ -1,8 +1,10 @@
+use std::sync::Arc;
+
 use hecs::World;
 use lazy_static::lazy_static;
 use rayon::prelude::*;
 
-use crate::{bsp::{bspcommon::{aabb_frustum, coord_space_transform, extract_frustum, transform_aabb}, bspfile::{BspFile, LSHProbeSample}, bsprenderer::BspMapRenderer}, component::{camera::Camera, mapmodel::MapModel, meshpose::MeshPose, rendermesh::{RenderMesh, SkinnedMesh}, transform3d::Transform3D}, graphics::model::{MeshVertex, ModelSkin}, math::{Matrix4x4, Vector4}, misc::AABB, MapData, TimeData, WindowData};
+use crate::{bsp::{bspcommon::{aabb_frustum, coord_space_transform, extract_frustum, transform_aabb}, bspfile::{BspFile, LSHProbeSample}, bsprenderer::BspMapRenderer}, component::{camera::Camera, mapmodel::MapModel, meshpose::MeshPose, rendermesh::{RenderMesh, SkinnedMesh}, transform3d::Transform3D}, graphics::model::{MeshVertex, Model, ModelSkin}, math::{Matrix4x4, Vector4}, misc::AABB, MapData, TimeData, WindowData};
 
 pub const NUM_CUSTOM_LIGHT_LAYERS: usize = 30;
 pub const CUSTOM_LIGHT_LAYER_START: usize = 32;
@@ -49,7 +51,11 @@ fn make_light_table(data: &[u8]) -> Vec<f32> {
     output
 }
 
-fn draw_mesh_iter(renderer: &BspMapRenderer, bsp: &BspFile, frustum: &[Vector4], mesh: &RenderMesh, transparent: bool, cur_node: &mut usize, parent_transform: Matrix4x4, viewproj: &Matrix4x4, sh: &LSHProbeSample) {
+fn sort_mesh_iter(renderer: &BspMapRenderer, bsp: &BspFile, frustum: &[Vector4], mesh: &RenderMesh, entity_idx: usize,
+    cur_node: &mut usize, parent_transform: Matrix4x4, viewproj: &Matrix4x4, sh: &LSHProbeSample,
+    out_opaque_meshes: &mut Vec<(Matrix4x4, Matrix4x4, Vector4, Vector4, Vector4, Arc<Model>, usize, usize, usize, isize)>,
+    out_transparent_meshes: &mut Vec<(Matrix4x4, Matrix4x4, Vector4, Vector4, Vector4, Arc<Model>, usize, usize, usize, isize)>
+) {
     let node = &mesh.mesh.nodes[*cur_node];
     let node_xform = node.transform * parent_transform;
     let mvp = node_xform * *viewproj;
@@ -58,31 +64,38 @@ fn draw_mesh_iter(renderer: &BspMapRenderer, bsp: &BspFile, frustum: &[Vector4],
         // draw mesh attached to node
         let node_mesh = &mesh.mesh.meshes[node.mesh_index as usize];
 
-        for part in &node_mesh.parts {
-            if let Some((vtx_buffer, idx_buffer)) = &part.buffers {
+        for (part_idx, part) in node_mesh.parts.iter().enumerate() {
+            let bounds = transform_aabb(&part.bounds, node_xform);
+            if aabb_frustum(&bounds, frustum) && renderer.check_vis(bsp, &bounds) {
                 let mat = &mesh.mesh.materials[part.material_index];
 
-                let bounds = transform_aabb(&part.bounds, node_xform);
-                if mat.transparent == transparent && aabb_frustum(&bounds, frustum) && renderer.check_vis(bsp, &bounds) {
-                    mat.apply();
-
-                    mat.shader.set_uniform_vec4("shR", sh.sh_r);
-                    mat.shader.set_uniform_vec4("shG", sh.sh_g);
-                    mat.shader.set_uniform_vec4("shB", sh.sh_b);
-                    mat.shader.set_uniform_mat4("localToWorld", node_xform);
-                    mat.shader.set_uniform_mat4("mvp", mvp);
-
-                    unsafe {
-                        gl::FrontFace(part.winding);
-
-                        gl::BindBuffer(gl::ARRAY_BUFFER, vtx_buffer.handle());
-                        gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, idx_buffer.handle());
-
-                        MeshVertex::setup_vtx_arrays(&mat.shader);
-
-                        // draw geometry
-                        gl::DrawElements(part.topology, part.indices.len() as i32, gl::UNSIGNED_SHORT, 0 as *const _);
-                    }
+                if mat.transparent {
+                    out_transparent_meshes.push((
+                        mvp,
+                        node_xform,
+                        sh.sh_r,
+                        sh.sh_g,
+                        sh.sh_b,
+                        mesh.mesh.clone(),
+                        node.mesh_index as usize,
+                        part_idx,
+                        entity_idx,
+                        node.skin_index,
+                    ));
+                }
+                else {
+                    out_opaque_meshes.push((
+                        mvp,
+                        node_xform,
+                        sh.sh_r,
+                        sh.sh_g,
+                        sh.sh_b,
+                        mesh.mesh.clone(),
+                        node.mesh_index as usize,
+                        part_idx,
+                        entity_idx,
+                        node.skin_index,
+                    ));
                 }
             }
         }
@@ -90,9 +103,9 @@ fn draw_mesh_iter(renderer: &BspMapRenderer, bsp: &BspFile, frustum: &[Vector4],
 
     *cur_node += 1;
 
-    // draw children
+    // sort children
     for _ in 0..node.num_children {
-        draw_mesh_iter(renderer, bsp, frustum, mesh, transparent, cur_node, node_xform, viewproj, sh);
+        sort_mesh_iter(renderer, bsp, frustum, mesh, entity_idx, cur_node, node_xform, viewproj, sh, out_opaque_meshes, out_transparent_meshes);
     }
 }
 
@@ -189,57 +202,43 @@ fn update_skinned_mesh_iter(mesh: &RenderMesh, pose: &MeshPose, sk: &mut Skinned
     }
 }
 
-fn draw_skinned_mesh_iter(renderer: &BspMapRenderer, bsp: &BspFile, frustum: &[Vector4], mesh: &RenderMesh, pose: &MeshPose, sk: &SkinnedMesh, transparent: bool, cur_node: &mut usize, parent_transform: Matrix4x4, viewproj: &Matrix4x4, sh: &LSHProbeSample) {
-    let node = &mesh.mesh.nodes[*cur_node];
-    let node_xform = pose.pose[*cur_node] * parent_transform;
-    let mvp = node_xform * *viewproj;
+fn draw_mesh_part(mesh: &Arc<Model>, mesh_index: usize, part_index: usize, sk: Option<&SkinnedMesh>, sh_r: Vector4, sh_g: Vector4, sh_b: Vector4, local_to_world: Matrix4x4, mvp: Matrix4x4, skin_index: isize) {
+    let part = &mesh.meshes[mesh_index].parts[part_index];
 
-    if node.mesh_index >= 0 {
-        // draw mesh attached to node
-        let node_mesh = &mesh.mesh.meshes[node.mesh_index as usize];
+    if let Some((vtx_buffer, idx_buffer)) = &part.buffers {
+        let mat = &mesh.materials[part.material_index];
 
-        for (part_idx, part) in node_mesh.parts.iter().enumerate() {
-            if let Some((vtx_buffer, idx_buffer)) = &part.buffers {
-                let mat = &mesh.mesh.materials[part.material_index];
-
-                let bounds = transform_aabb(&part.bounds, node_xform);
-                if mat.transparent == transparent && aabb_frustum(&bounds, frustum) && renderer.check_vis(bsp, &bounds) {
-                    let vtx_buffer = if node.skin_index >= 0 {
-                        &sk.vtx_buffer[node.mesh_index as usize][part_idx]
-                    }
-                    else {
-                        vtx_buffer
-                    };
-
-                    mat.apply();
-
-                    mat.shader.set_uniform_vec4("shR", sh.sh_r);
-                    mat.shader.set_uniform_vec4("shG", sh.sh_g);
-                    mat.shader.set_uniform_vec4("shB", sh.sh_b);
-                    mat.shader.set_uniform_mat4("localToWorld", node_xform);
-                    mat.shader.set_uniform_mat4("mvp", mvp);
-
-                    unsafe {
-                        gl::FrontFace(part.winding);
-
-                        gl::BindBuffer(gl::ARRAY_BUFFER, vtx_buffer.handle());
-                        gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, idx_buffer.handle());
-
-                        MeshVertex::setup_vtx_arrays(&mat.shader);
-
-                        // draw geometry
-                        gl::DrawElements(part.topology, part.indices.len() as i32, gl::UNSIGNED_SHORT, 0 as *const _);
-                    }
-                }
+        let vtx_buffer = if skin_index >= 0 {
+            if let Some(skin) = sk {
+                &skin.vtx_buffer[mesh_index][part_index]
+            }
+            else {
+                vtx_buffer
             }
         }
-    }
+        else {
+            vtx_buffer
+        };
 
-    *cur_node += 1;
+        mat.apply();
 
-    // draw children
-    for _ in 0..node.num_children {
-        draw_skinned_mesh_iter(renderer, bsp, frustum, mesh, pose, sk, transparent, cur_node, parent_transform, viewproj, sh);
+        mat.shader.set_uniform_vec4("shR", sh_r);
+        mat.shader.set_uniform_vec4("shG", sh_g);
+        mat.shader.set_uniform_vec4("shB", sh_b);
+        mat.shader.set_uniform_mat4("localToWorld", local_to_world);
+        mat.shader.set_uniform_mat4("mvp", mvp);
+
+        unsafe {
+            gl::FrontFace(part.winding);
+
+            gl::BindBuffer(gl::ARRAY_BUFFER, vtx_buffer.handle());
+            gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, idx_buffer.handle());
+
+            MeshVertex::setup_vtx_arrays(&mat.shader);
+
+            // draw geometry
+            gl::DrawElements(part.topology, part.indices.len() as i32, gl::UNSIGNED_SHORT, 0 as *const _);
+        }
     }
 }
 
@@ -352,9 +351,43 @@ pub fn render_system(time: &TimeData, window_data: &WindowData, map_data: &mut M
             let vis = aabb_frustum(&submodel_bounds, &frustum) && renderer.check_vis(&map_data.map, &submodel_bounds);
 
             if vis {
-
                 visible_model_transforms.push(model_mat);
                 visible_model_indices.push(model_info.model_idx);
+            }
+        }
+
+        // gather visible meshes
+        let mut opaque_meshes = Vec::new();
+        let mut transparent_meshes = Vec::new();
+        for (_, (mesh, transform)) in &meshes {
+            let sh = map_data.map.lsh_grid_lump.sample_position(transform.position, &light_styles);
+
+            let model_transform = mesh.mesh.root_transform
+                * Matrix4x4::scale(transform.scale)
+                * Matrix4x4::rotation(transform.rotation)
+                * Matrix4x4::translation(transform.position);
+            
+            let mut cur_node = 0;
+            while cur_node < mesh.mesh.nodes.len() {
+                sort_mesh_iter(&renderer, &map_data.map, &frustum, mesh, 0, &mut cur_node, model_transform, &viewproj, &sh,
+                    &mut opaque_meshes, &mut transparent_meshes);
+            }
+        }
+
+        let mut opaque_sk_meshes = Vec::new();
+        let mut transparent_sk_meshes = Vec::new();
+        for (idx, (_, (mesh, transform, _, _))) in sk_meshes.iter().enumerate() {
+            let sh = map_data.map.lsh_grid_lump.sample_position(transform.position, &light_styles);
+
+            let model_transform = mesh.mesh.root_transform
+                * Matrix4x4::scale(transform.scale)
+                * Matrix4x4::rotation(transform.rotation)
+                * Matrix4x4::translation(transform.position);
+            
+            let mut cur_node = 0;
+            while cur_node < mesh.mesh.nodes.len() {
+                sort_mesh_iter(&renderer, &map_data.map, &frustum, mesh, idx, &mut cur_node, model_transform, &viewproj, &sh, 
+                    &mut opaque_sk_meshes, &mut transparent_sk_meshes);
             }
         }
 
@@ -372,32 +405,13 @@ pub fn render_system(time: &TimeData, window_data: &WindowData, map_data: &mut M
         }
 
         // draw opaque mesh parts
-        for (_, (mesh, transform)) in &meshes {
-            let sh = map_data.map.lsh_grid_lump.sample_position(transform.position, &light_styles);
-
-            let model_transform = mesh.mesh.root_transform
-                * Matrix4x4::scale(transform.scale)
-                * Matrix4x4::rotation(transform.rotation)
-                * Matrix4x4::translation(transform.position);
-            
-            let mut cur_node = 0;
-            while cur_node < mesh.mesh.nodes.len() {
-                draw_mesh_iter(&renderer, &map_data.map, &frustum, mesh, false, &mut cur_node, model_transform, &viewproj, &sh);
-            }
+        for (mvp, local_to_world, sh_r, sh_g, sh_b, model, mesh_idx, part_idx, _, _) in opaque_meshes {
+            draw_mesh_part(&model, mesh_idx, part_idx, None, sh_r, sh_g, sh_b, local_to_world, mvp, -1);
         }
 
-        for (_, (mesh, transform, sk, pose)) in &sk_meshes {
-            let sh = map_data.map.lsh_grid_lump.sample_position(transform.position, &light_styles);
-
-            let model_transform = mesh.mesh.root_transform
-                * Matrix4x4::scale(transform.scale)
-                * Matrix4x4::rotation(transform.rotation)
-                * Matrix4x4::translation(transform.position);
-            
-            let mut cur_node = 0;
-            while cur_node < mesh.mesh.nodes.len() {
-                draw_skinned_mesh_iter(&renderer, &map_data.map, &frustum, mesh, pose, sk, false, &mut cur_node, model_transform, &viewproj, &sh);
-            }
+        for (mvp, local_to_world, sh_r, sh_g, sh_b, model, mesh_idx, part_idx, entity_idx, skin_index) in opaque_sk_meshes {
+            let sk = sk_meshes[entity_idx].1.2;
+            draw_mesh_part(&model, mesh_idx, part_idx, Some(sk), sh_r, sh_g, sh_b, local_to_world, mvp, skin_index);
         }
 
         // draw transparent map geometry
@@ -408,33 +422,13 @@ pub fn render_system(time: &TimeData, window_data: &WindowData, map_data: &mut M
         }
 
         // draw transparent mesh parts
-        // TODO: this feels super inefficient for deep hierarchies. Maybe just avoid those?
-        for (_, (mesh, transform)) in &meshes {
-            let sh = map_data.map.lsh_grid_lump.sample_position(transform.position, &light_styles);
-
-            let model_transform = mesh.mesh.root_transform
-                * Matrix4x4::scale(transform.scale)
-                * Matrix4x4::rotation(transform.rotation)
-                * Matrix4x4::translation(transform.position);
-            
-            let mut cur_node = 0;
-            while cur_node < mesh.mesh.nodes.len() {
-                draw_mesh_iter(&renderer, &map_data.map, &frustum, mesh, true, &mut cur_node, model_transform, &viewproj, &sh);
-            }
+        for (mvp, local_to_world, sh_r, sh_g, sh_b, model, mesh_idx, part_idx, _, _) in transparent_meshes {
+            draw_mesh_part(&model, mesh_idx, part_idx, None, sh_r, sh_g, sh_b, local_to_world, mvp, -1);
         }
 
-        for (_, (mesh, transform, sk, pose)) in &sk_meshes {
-            let sh = map_data.map.lsh_grid_lump.sample_position(transform.position, &light_styles);
-
-            let model_transform = mesh.mesh.root_transform
-                * Matrix4x4::scale(transform.scale)
-                * Matrix4x4::rotation(transform.rotation)
-                * Matrix4x4::translation(transform.position);
-            
-            let mut cur_node = 0;
-            while cur_node < mesh.mesh.nodes.len() {
-                draw_skinned_mesh_iter(&renderer, &map_data.map, &frustum, mesh, pose, sk, true, &mut cur_node, model_transform, &viewproj, &sh);
-            }
+        for (mvp, local_to_world, sh_r, sh_g, sh_b, model, mesh_idx, part_idx, entity_idx, skin_index) in transparent_sk_meshes {
+            let sk = sk_meshes[entity_idx].1.2;
+            draw_mesh_part(&model, mesh_idx, part_idx, Some(sk), sh_r, sh_g, sh_b, local_to_world, mvp, skin_index);
         }
 
         camera_index += 1;
