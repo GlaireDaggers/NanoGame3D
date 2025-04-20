@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{cmp::Reverse, sync::Arc};
 
 use hecs::World;
 use lazy_static::lazy_static;
@@ -53,8 +53,8 @@ fn make_light_table(data: &[u8]) -> Vec<f32> {
 
 fn sort_mesh_iter(renderer: &BspMapRenderer, bsp: &BspFile, frustum: &[Vector4], mesh: &RenderMesh, entity_idx: usize,
     cur_node: &mut usize, parent_transform: Matrix4x4, viewproj: &Matrix4x4, sh: &LSHProbeSample,
-    out_opaque_meshes: &mut Vec<(Matrix4x4, Matrix4x4, Vector4, Vector4, Vector4, Arc<Model>, usize, usize, usize, isize)>,
-    out_transparent_meshes: &mut Vec<(Matrix4x4, Matrix4x4, Vector4, Vector4, Vector4, Arc<Model>, usize, usize, usize, isize)>
+    out_opaque_meshes: &mut Vec<(Matrix4x4, Matrix4x4, Vector4, Vector4, Vector4, Arc<Model>, usize, usize, usize, isize, f32)>,
+    out_transparent_meshes: &mut Vec<(Matrix4x4, Matrix4x4, Vector4, Vector4, Vector4, Arc<Model>, usize, usize, usize, isize, f32)>
 ) {
     let node = &mesh.mesh.nodes[*cur_node];
     let node_xform = node.transform * parent_transform;
@@ -69,6 +69,9 @@ fn sort_mesh_iter(renderer: &BspMapRenderer, bsp: &BspFile, frustum: &[Vector4],
             if aabb_frustum(&bounds, frustum) && renderer.check_vis(bsp, &bounds) {
                 let mat = &mesh.mesh.materials[part.material_index];
 
+                let viewpos = mvp * Vector4::new(0.0, 0.0, 0.0, 1.0);
+                let depth = viewpos.z / viewpos.w;
+
                 if mat.transparent {
                     out_transparent_meshes.push((
                         mvp,
@@ -81,6 +84,7 @@ fn sort_mesh_iter(renderer: &BspMapRenderer, bsp: &BspFile, frustum: &[Vector4],
                         part_idx,
                         entity_idx,
                         node.skin_index,
+                        depth,
                     ));
                 }
                 else {
@@ -95,6 +99,7 @@ fn sort_mesh_iter(renderer: &BspMapRenderer, bsp: &BspFile, frustum: &[Vector4],
                         part_idx,
                         entity_idx,
                         node.skin_index,
+                        depth,
                     ));
                 }
             }
@@ -356,7 +361,8 @@ pub fn render_system(time: &TimeData, window_data: &WindowData, map_data: &mut M
             }
         }
 
-        // gather visible meshes
+        // gather visible static & skinned meshes
+        
         let mut opaque_meshes = Vec::new();
         let mut transparent_meshes = Vec::new();
         for (_, (mesh, transform)) in &meshes {
@@ -391,6 +397,24 @@ pub fn render_system(time: &TimeData, window_data: &WindowData, map_data: &mut M
             }
         }
 
+        // sort opaque meshes in front-to-back order
+        opaque_meshes.sort_by(|a, b| {
+            a.10.total_cmp(&b.10)
+        });
+
+        opaque_sk_meshes.sort_by(|a, b| {
+            a.10.total_cmp(&b.10)
+        });
+
+        // sort transparent meshes in back-to-front order
+        transparent_meshes.sort_by(|a, b| {
+            b.10.total_cmp(&a.10)
+        });
+
+        transparent_sk_meshes.sort_by(|a, b| {
+            b.10.total_cmp(&a.10)
+        });
+
         // update models
         map_data.map_model_renderer.update(&light_styles, &visible_model_indices);
 
@@ -405,11 +429,11 @@ pub fn render_system(time: &TimeData, window_data: &WindowData, map_data: &mut M
         }
 
         // draw opaque mesh parts
-        for (mvp, local_to_world, sh_r, sh_g, sh_b, model, mesh_idx, part_idx, _, _) in opaque_meshes {
+        for (mvp, local_to_world, sh_r, sh_g, sh_b, model, mesh_idx, part_idx, _, _, _) in opaque_meshes {
             draw_mesh_part(&model, mesh_idx, part_idx, None, sh_r, sh_g, sh_b, local_to_world, mvp, -1);
         }
 
-        for (mvp, local_to_world, sh_r, sh_g, sh_b, model, mesh_idx, part_idx, entity_idx, skin_index) in opaque_sk_meshes {
+        for (mvp, local_to_world, sh_r, sh_g, sh_b, model, mesh_idx, part_idx, entity_idx, skin_index, _) in opaque_sk_meshes {
             let sk = sk_meshes[entity_idx].1.2;
             draw_mesh_part(&model, mesh_idx, part_idx, Some(sk), sh_r, sh_g, sh_b, local_to_world, mvp, skin_index);
         }
@@ -422,11 +446,11 @@ pub fn render_system(time: &TimeData, window_data: &WindowData, map_data: &mut M
         }
 
         // draw transparent mesh parts
-        for (mvp, local_to_world, sh_r, sh_g, sh_b, model, mesh_idx, part_idx, _, _) in transparent_meshes {
+        for (mvp, local_to_world, sh_r, sh_g, sh_b, model, mesh_idx, part_idx, _, _, _) in transparent_meshes {
             draw_mesh_part(&model, mesh_idx, part_idx, None, sh_r, sh_g, sh_b, local_to_world, mvp, -1);
         }
 
-        for (mvp, local_to_world, sh_r, sh_g, sh_b, model, mesh_idx, part_idx, entity_idx, skin_index) in transparent_sk_meshes {
+        for (mvp, local_to_world, sh_r, sh_g, sh_b, model, mesh_idx, part_idx, entity_idx, skin_index, _) in transparent_sk_meshes {
             let sk = sk_meshes[entity_idx].1.2;
             draw_mesh_part(&model, mesh_idx, part_idx, Some(sk), sh_r, sh_g, sh_b, local_to_world, mvp, skin_index);
         }
