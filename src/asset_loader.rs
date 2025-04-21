@@ -5,13 +5,19 @@ use gltf::{import_buffers, Gltf};
 use lazy_static::lazy_static;
 use toml::{map::Map, Table};
 
-use crate::{graphics::{material::{Material, TextureSampler}, model::Model, shader::Shader, texture::{Texture, TextureFormat}}, parse_utils::{parse_vec2, parse_vec3, parse_vec4}};
+use crate::{effect::effect_data::EffectData, graphics::{material::{Material, TextureSampler}, model::Model, shader::Shader, texture::{Texture, TextureFormat}}, parse_utils::{parse_vec2, parse_vec3, parse_vec4}};
 
 lazy_static! {
     static ref TEXTURE_CACHE: RwLock<TextureCache> = RwLock::new(TextureCache::new());
     static ref SHADER_CACHE: RwLock<ShaderCache> = RwLock::new(ShaderCache::new());
     static ref MATERIAL_CACHE: RwLock<MaterialCache> = RwLock::new(MaterialCache::new());
     static ref MODEL_CACHE: RwLock<ModelCache> = RwLock::new(ModelCache::new());
+    static ref EFFECT_CACHE: RwLock<EffectCache> = RwLock::new(EffectCache::new());
+}
+
+pub fn unload_texture(path: &str) {
+    let tex_cache = &mut TEXTURE_CACHE.write().unwrap();
+    tex_cache.unload(path);
 }
 
 pub fn load_texture(path: &str) -> Result<Arc<Texture>, ResourceError> {
@@ -19,9 +25,19 @@ pub fn load_texture(path: &str) -> Result<Arc<Texture>, ResourceError> {
     return tex_cache.load(path);
 }
 
+pub fn unload_shader(path: &str) {
+    let shader_cache = &mut SHADER_CACHE.write().unwrap();
+    shader_cache.unload(path);
+}
+
 pub fn load_shader(path: &str) -> Result<Arc<Shader>, ResourceError> {
     let shader_cache = &mut SHADER_CACHE.write().unwrap();
     return shader_cache.load(path);
+}
+
+pub fn unload_material(path: &str) {
+    let material_cache = &mut MATERIAL_CACHE.write().unwrap();
+    material_cache.unload(path);
 }
 
 pub fn load_material(path: &str) -> Result<Arc<Material>, ResourceError> {
@@ -29,9 +45,24 @@ pub fn load_material(path: &str) -> Result<Arc<Material>, ResourceError> {
     return material_cache.load(path);
 }
 
+pub fn unload_model(path: &str) {
+    let model_cache = &mut MODEL_CACHE.write().unwrap();
+    model_cache.unload(path);
+}
+
 pub fn load_model(path: &str) -> Result<Arc<Model>, ResourceError> {
     let model_cache = &mut MODEL_CACHE.write().unwrap();
     return model_cache.load(path);
+}
+
+pub fn unload_effect(path: &str) {
+    let effect_cache = &mut EFFECT_CACHE.write().unwrap();
+    effect_cache.unload(path);
+}
+
+pub fn load_effect(path: &str) -> Result<Arc<EffectData>, ResourceError> {
+    let effect_cache = &mut EFFECT_CACHE.write().unwrap();
+    return effect_cache.load(path);
 }
 
 #[derive(Debug)]
@@ -169,6 +200,28 @@ impl ResourceLoader<Model> for ModelLoader {
         };
 
         Ok(Model::from_gltf(&gltf.document, &buffers, &material_path))
+    }
+}
+
+pub struct EffectLoader {
+}
+
+impl ResourceLoader<EffectData> for EffectLoader {
+    fn load_resource(path: &str) -> Result<EffectData, ResourceError> {
+        let effect_str = match fs::read_to_string(path) {
+            Ok(v) => v,
+            Err(e) => return Err(ResourceError::IOError(e))
+        };
+
+        let effect_data = match ron::from_str::<EffectData>(&effect_str) {
+            Ok(v) => v,
+            Err(e) => {
+                println!("PARSE ERROR: {:?}", e);
+                return Err(ResourceError::ParseError);
+            }
+        };
+
+        Ok(effect_data)
     }
 }
 
@@ -420,7 +473,10 @@ impl ResourceLoader<Material> for MaterialLoader {
                 None => return Err(ResourceError::ParseError)
             };
 
-            let val = parse_vec2(val_str);
+            let val = match parse_vec2(val_str) {
+                Ok(v) => v,
+                Err(_) => return Err(ResourceError::ParseError)
+            };
             material.vec2.insert(p.0.to_owned(), val);
         }
 
@@ -430,7 +486,10 @@ impl ResourceLoader<Material> for MaterialLoader {
                 None => return Err(ResourceError::ParseError)
             };
 
-            let val = parse_vec3(val_str);
+            let val = match parse_vec3(val_str) {
+                Ok(v) => v,
+                Err(_) => return Err(ResourceError::ParseError)
+            };
             material.vec3.insert(p.0.to_owned(), val);
         }
 
@@ -440,7 +499,10 @@ impl ResourceLoader<Material> for MaterialLoader {
                 None => return Err(ResourceError::ParseError)
             };
 
-            let val = parse_vec4(val_str);
+            let val = match parse_vec4(val_str) {
+                Ok(v) => v,
+                Err(_) => return Err(ResourceError::ParseError)
+            };
             material.vec4.insert(p.0.to_owned(), val);
         }
 
@@ -466,6 +528,10 @@ impl<TResource, TResourceLoader> ResourceCache<TResource, TResourceLoader>
             cache: HashMap::new(),
             phantom: PhantomData::default()
         }
+    }
+
+    pub fn unload(self: &mut Self, path: &str) {
+        self.cache.remove(path);
     }
 
     pub fn load(self: &mut Self, path: &str) -> Result<Arc<TResource>, ResourceError> {
@@ -505,3 +571,4 @@ pub type TextureCache = ResourceCache<Texture, TextureLoader>;
 pub type ShaderCache = ResourceCache<Shader, ShaderLoader>;
 pub type MaterialCache = ResourceCache<Material, MaterialLoader>;
 pub type ModelCache = ResourceCache<Model, ModelLoader>;
+pub type EffectCache = ResourceCache<EffectData, EffectLoader>;

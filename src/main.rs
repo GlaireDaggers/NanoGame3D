@@ -1,6 +1,6 @@
 use std::{collections::HashMap, ffi::CStr, fs::File};
 
-use asset_loader::load_model;
+use asset_loader::{load_effect, load_model};
 use bsp::{bspcommon::aabb_aabb_intersects, bspfile::BspFile, bsplightmap::BspLightmap, bsprenderer::{BspMapModelRenderer, BspMapRenderer, BspMapTextures}};
 use component::{basicanim::{AnimationLoopMode, BasicLerpAnim}, camera::{Camera, FPCamera}, charactercontroller::CharacterController, door::{Door, DoorLink, DoorOpener}, fpview::FPView, light::Light, mapmodel::MapModel, meshpose::MeshPose, playerinput::PlayerInput, rendermesh::{RenderMesh, SkinnedMesh}, rotator::Rotator, transform3d::Transform3D, triggerable::{TriggerLink, TriggerState}};
 use hecs::{CommandBuffer, Entity, World};
@@ -22,9 +22,11 @@ pub mod bsp;
 pub mod misc;
 pub mod graphics;
 pub mod asset_loader;
+pub mod serialization;
 pub mod component;
 pub mod system;
 pub mod parse_utils;
+pub mod effect;
 
 #[derive(Default)]
 pub struct InputState {
@@ -457,6 +459,9 @@ fn main() {
     basis_universal::transcoder_init();
 
     sdl_video.gl_set_swap_interval(1).unwrap();
+
+    // test: load effect
+    let _test_effect = load_effect("content/effects/fire.ron").unwrap();
 
     // create game state
     let mut game_state = GameState::new();

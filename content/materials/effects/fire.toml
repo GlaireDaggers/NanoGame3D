@@ -1,0 +1,4 @@
+shader = "content/shaders/default_particle.toml"
+
+[texture2D]
+mainTexture = { path = "content/textures/brick.basis", filter = true, wrap_s = false, wrap_t = false }

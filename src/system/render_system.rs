@@ -1,4 +1,4 @@
-use std::{cmp::Reverse, sync::Arc};
+use std::sync::Arc;
 
 use hecs::World;
 use lazy_static::lazy_static;

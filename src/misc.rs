@@ -1,4 +1,4 @@
-use crate::math::Vector3;
+use crate::math::{Vector3, Vector4};
 
 #[derive(Default, Clone, Copy)]
 pub struct Color32 {
@@ -11,6 +11,19 @@ pub struct Color32 {
 impl Color32 {
     pub fn new(r: u8, g: u8, b: u8, a: u8) -> Color32 {
         Color32 { r, g, b, a }
+    }
+
+    pub fn from_vec4(vec: Vector4) -> Color32 {
+        let r = (vec.x.clamp(0.0, 1.0) * 255.0) as u8;
+        let g = (vec.y.clamp(0.0, 1.0) * 255.0) as u8;
+        let b = (vec.z.clamp(0.0, 1.0) * 255.0) as u8;
+        let a = (vec.w.clamp(0.0, 1.0) * 255.0) as u8;
+
+        Color32::new(r, g, b, a)
+    }
+
+    pub fn to_vec4(self: Self) -> Vector4 {
+        Vector4::new(self.r as f32 / 255.0, self.g as f32 / 255.0, self.b as f32 / 255.0, self.a as f32 / 255.0)
     }
 }
 
