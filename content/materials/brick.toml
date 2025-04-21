@@ -1,4 +1,0 @@
-shader = "content/shaders/map_shader.toml"
-
-[texture2D]
-mainTexture = { path = "content/textures/brick.basis", filter = true, wrap_s = true, wrap_t = true }

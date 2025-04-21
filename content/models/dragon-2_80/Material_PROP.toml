@@ -1,4 +1,0 @@
-shader = "content/shaders/prop_shader.toml"
-
-[texture2D]
-mainTexture = { path = "content/models/dragon-2_80/dragon.basis", filter = true, wrap_s = false, wrap_t = false }

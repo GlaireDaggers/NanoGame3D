@@ -38,7 +38,7 @@
                 orbit_axis: "0 0 1",
             ),
             display: Sprite (
-                material: "content/materials/effects/fire.toml",
+                material: "content/materials/effects/fire.mat.ron",
                 size: [
                     ( time: 0.0, value: "1 1" ),
                     ( time: 1.0, value: "2 2" ),

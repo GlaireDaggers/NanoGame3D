@@ -11,10 +11,19 @@ pub enum EffectEmissionShape {
 }
 
 #[derive(Deserialize)]
+pub struct EffectSpritesheet {
+    pub rows: u32,
+    pub columns: u32,
+    pub random_start: bool,
+    pub timescale: f32,
+}
+
+#[derive(Deserialize)]
 pub enum EffectDisplay {
     None,
     Sprite {
         material: SerializedResource<Material>,
+        sheet: Option<EffectSpritesheet>,
         size: Vector2Curve,
         color: Color32Curve,
     },

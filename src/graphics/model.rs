@@ -368,7 +368,7 @@ impl Model {
 
         // load materials
         let materials: Vec<Arc<Material>> = gltf.materials().map(|x| {
-            let mat_path = format!("{}/{}.toml", material_path, x.name().unwrap());
+            let mat_path = format!("{}/{}.mat.ron", material_path, x.name().unwrap());
             load_material(mat_path.as_str()).unwrap()
         }).collect();
 

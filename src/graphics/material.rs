@@ -1,137 +1,264 @@
 use std::{collections::HashMap, sync::Arc};
 
-use gl::types;
+use serde::Deserialize;
 
-use crate::math::{Matrix4x4, Vector2, Vector3, Vector4};
+use crate::{math::{Vector2, Vector3, Vector4}, serialization::SerializedResource};
 
 use super::{shader::Shader, texture::Texture};
 
-#[derive(Clone)]
+#[derive(Deserialize, Clone)]
 pub struct TextureSampler {
-    pub texture: Arc<Texture>,
+    pub texture: SerializedResource<Texture>,
     pub filter: bool,
     pub wrap_s: bool,
     pub wrap_t: bool
 }
 
-#[derive(Clone)]
+#[derive(Deserialize, Clone)]
+pub enum CullMode {
+    Off,
+    Front,
+    Back
+}
+
+impl Default for CullMode {
+    fn default() -> Self {
+        CullMode::Back
+    }
+}
+
+#[derive(Deserialize, Clone)]
+pub enum DepthCompare {
+    Always,
+    Never,
+    Equal,
+    NotEqual,
+    Less,
+    Greater,
+    LessOrEqual,
+    GreaterOrEqual,
+}
+
+impl Default for DepthCompare {
+    fn default() -> Self {
+        DepthCompare::LessOrEqual
+    }
+}
+
+#[derive(Deserialize, Clone)]
+pub enum BlendEquation {
+    Add,
+    Subtract,
+    ReverseSubtract,
+}
+
+impl Default for BlendEquation {
+    fn default() -> Self {
+        BlendEquation::Add
+    }
+}
+
+#[derive(Deserialize, Clone)]
+pub enum BlendFunction {
+    Zero,
+    One,
+    SrcColor,
+    SrcAlpha,
+    DstColor,
+    DstAlpha,
+    OneMinusSrcColor,
+    OneMinusSrcAlpha,
+    OneMinusDstColor,
+    OneMinusDstAlpha,
+}
+
+impl BlendFunction {
+    pub fn to_gl(&self) -> gl::types::GLenum {
+        match self {
+            BlendFunction::Zero => gl::ZERO,
+            BlendFunction::One => gl::ONE,
+            BlendFunction::SrcColor => gl::SRC_COLOR,
+            BlendFunction::SrcAlpha => gl::SRC_ALPHA,
+            BlendFunction::DstColor => gl::DST_COLOR,
+            BlendFunction::DstAlpha => gl::DST_ALPHA,
+            BlendFunction::OneMinusSrcColor => gl::ONE_MINUS_SRC_COLOR,
+            BlendFunction::OneMinusSrcAlpha => gl::ONE_MINUS_SRC_ALPHA,
+            BlendFunction::OneMinusDstColor => gl::ONE_MINUS_DST_COLOR,
+            BlendFunction::OneMinusDstAlpha => gl::ONE_MINUS_DST_ALPHA,
+        }
+    }
+}
+
+fn blend_func_default_src() -> BlendFunction {
+    BlendFunction::One
+}
+
+fn blend_func_default_dst() -> BlendFunction {
+    BlendFunction::Zero
+}
+
+fn default_depth_test() -> bool {
+    true
+}
+
+fn default_depth_write() -> bool {
+    true
+}
+
+#[derive(Deserialize, Clone)]
+pub enum MaterialParam {
+    Float(f32),
+    Vec2(Vector2),
+    Vec3(Vector3),
+    Vec4(Vector4),
+    Texture(TextureSampler),
+}
+
+#[derive(Deserialize, Clone)]
 pub struct Material {
-    pub shader : Arc<Shader>,
+    pub shader : SerializedResource<Shader>,
     
+    #[serde(default)]
     pub transparent : bool,
     
-    pub enable_cull : bool,
-    pub cull : types::GLenum,
-    pub depth_test : bool,
-    pub depth_write : bool,
-    pub depth_cmp : types::GLenum,
-    pub blend : bool,
-    pub blend_equation : types::GLenum,
-    pub blend_src : types::GLenum,
-    pub blend_dst : types::GLenum,
+    #[serde(default)]
+    pub cull: CullMode,
 
-    pub texture : HashMap<String, TextureSampler>,
-    pub float : HashMap<String, f32>,
-    pub vec2 : HashMap<String, Vector2>,
-    pub vec3 : HashMap<String, Vector3>,
-    pub vec4 : HashMap<String, Vector4>,
-    pub mat4 : HashMap<String, Matrix4x4>,
+    #[serde(default = "default_depth_test")]
+    pub depth_test : bool,
+
+    #[serde(default = "default_depth_write")]
+    pub depth_write : bool,
+
+    #[serde(default)]
+    pub depth_cmp : DepthCompare,
+
+    #[serde(default)]
+    pub blend : bool,
+
+    #[serde(default)]
+    pub blend_equation : BlendEquation,
+
+    #[serde(default = "blend_func_default_src")]
+    pub blend_src : BlendFunction,
+
+    #[serde(default = "blend_func_default_dst")]
+    pub blend_dst : BlendFunction,
+
+    pub params : HashMap<String, MaterialParam>,
 }
 
 impl Material {
     pub fn new(shader: Arc<Shader>) -> Material {
         Material {
-            shader,
+            shader: SerializedResource { resource: shader },
             
             transparent: false,
-            enable_cull: true,
-            cull: gl::BACK,
+            cull: CullMode::Back,
             depth_test: true,
             depth_write: true,
-            depth_cmp: gl::LEQUAL,
+            depth_cmp: DepthCompare::LessOrEqual,
             blend: false,
-            blend_equation: gl::FUNC_ADD,
-            blend_src: gl::ONE,
-            blend_dst: gl::ZERO,
+            blend_equation: BlendEquation::Add,
+            blend_src: BlendFunction::One,
+            blend_dst: BlendFunction::Zero,
 
-            texture: HashMap::new(),
-            float: HashMap::new(),
-            vec2: HashMap::new(),
-            vec3: HashMap::new(),
-            vec4: HashMap::new(),
-            mat4: HashMap::new(),
+            params: HashMap::new(),
         }
     }
 
     pub fn apply(self: &Self) {
-        self.shader.set_active();
+        self.shader.resource.set_active();
 
         unsafe {
-            if self.enable_cull { gl::Enable(gl::CULL_FACE) } else { gl::Disable(gl::CULL_FACE) };
-            gl::CullFace(self.cull);
+            match self.cull {
+                CullMode::Off => {
+                    gl::Disable(gl::CULL_FACE);
+                }
+                CullMode::Back => {
+                    gl::Enable(gl::CULL_FACE);
+                    gl::CullFace(gl::BACK);
+                }
+                CullMode::Front => {
+                    gl::Enable(gl::CULL_FACE);
+                    gl::CullFace(gl::FRONT);
+                }
+            }
             
             if self.depth_test { gl::Enable(gl::DEPTH_TEST) } else { gl::Disable(gl::DEPTH_TEST) };
             gl::DepthMask(if self.depth_write { gl::TRUE } else { gl::FALSE });
-            gl::DepthFunc(self.depth_cmp);
+
+            gl::DepthFunc(match self.depth_cmp {
+                DepthCompare::Always => gl::ALWAYS,
+                DepthCompare::Never => gl::NEVER,
+                DepthCompare::Equal => gl::EQUAL,
+                DepthCompare::NotEqual => gl::NOTEQUAL,
+                DepthCompare::Less => gl::LESS,
+                DepthCompare::Greater => gl::GREATER,
+                DepthCompare::LessOrEqual => gl::LEQUAL,
+                DepthCompare::GreaterOrEqual => gl::GEQUAL,
+            });
             
             if self.blend { gl::Enable(gl::BLEND) } else { gl::Disable(gl::BLEND) };
-            gl::BlendEquation(self.blend_equation);
-            gl::BlendFunc(self.blend_src, self.blend_dst);
+            gl::BlendEquation(match self.blend_equation {
+                BlendEquation::Add => gl::FUNC_ADD,
+                BlendEquation::Subtract => gl::FUNC_SUBTRACT,
+                BlendEquation::ReverseSubtract => gl::FUNC_REVERSE_SUBTRACT,
+            });
+
+            gl::BlendFunc(self.blend_src.to_gl(), self.blend_dst.to_gl());
         }
 
         let mut cur_tex_slot = 0;
-        for p in &self.texture {
-            unsafe {
-                gl::ActiveTexture(gl::TEXTURE0 + cur_tex_slot);
 
-                gl::BindTexture(gl::TEXTURE_2D, p.1.texture.handle());
-
-                if p.1.filter {
-                    gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32);
-                    gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32);
-                }
-                else {
-                    gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32);
-                    gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32);
-                }
-
-                if p.1.wrap_s {
-                    gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::REPEAT as i32);
-                }
-                else {
-                    gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as i32)
-                }
-
-                if p.1.wrap_t {
-                    gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::REPEAT as i32);
-                }
-                else {
-                    gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as i32)
-                }
+        for param in &self.params {
+            match param.1 {
+                MaterialParam::Float(val) => {
+                    self.shader.resource.set_uniform_float(param.0, *val);
+                },
+                MaterialParam::Vec2(val) => {
+                    self.shader.resource.set_uniform_vec2(param.0, *val);
+                },
+                MaterialParam::Vec3(val) => {
+                    self.shader.resource.set_uniform_vec3(param.0, *val);
+                },
+                MaterialParam::Vec4(val) => {
+                    self.shader.resource.set_uniform_vec4(param.0, *val);
+                },
+                MaterialParam::Texture(val) => {
+                    unsafe {
+                        gl::ActiveTexture(gl::TEXTURE0 + cur_tex_slot);
+        
+                        gl::BindTexture(gl::TEXTURE_2D, val.texture.resource.handle());
+        
+                        if val.filter {
+                            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32);
+                            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32);
+                        }
+                        else {
+                            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32);
+                            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32);
+                        }
+        
+                        if val.wrap_s {
+                            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::REPEAT as i32);
+                        }
+                        else {
+                            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as i32)
+                        }
+        
+                        if val.wrap_t {
+                            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::REPEAT as i32);
+                        }
+                        else {
+                            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as i32)
+                        }
+                    }
+        
+                    self.shader.resource.set_uniform_int(param.0, cur_tex_slot as i32);
+                    cur_tex_slot += 1;
+                },
             }
-
-            self.shader.set_uniform_int(p.0, cur_tex_slot as i32);
-            cur_tex_slot += 1;
-        }
-
-        for p in &self.float {
-            self.shader.set_uniform_float(p.0, *p.1);
-        }
-
-        for p in &self.vec2 {
-            self.shader.set_uniform_vec2(p.0, *p.1);
-        }
-
-        for p in &self.vec3 {
-            self.shader.set_uniform_vec3(p.0, *p.1);
-        }
-
-        for p in &self.vec4 {
-            self.shader.set_uniform_vec4(p.0, *p.1);
-        }
-
-        for p in &self.mat4 {
-            self.shader.set_uniform_mat4(p.0, *p.1);
         }
     }
 }

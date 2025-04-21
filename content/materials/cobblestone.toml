@@ -1,4 +1,0 @@
-shader = "content/shaders/map_shader.toml"
-
-[texture2D]
-mainTexture = { path = "content/textures/cobblestone.basis", filter = true, wrap.s = true, wrap.t = true }

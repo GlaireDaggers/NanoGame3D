@@ -1,0 +1,12 @@
+#![enable(implicit_some)]
+(
+    shader: "content/shaders/default_particle.toml",
+    params: {
+        "mainTexture": Texture ((
+            texture: "content/textures/brick.basis",
+            filter: true,
+            wrap_s: false,
+            wrap_t: false,
+        ))
+    }
+)

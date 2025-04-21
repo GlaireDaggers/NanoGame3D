@@ -227,11 +227,11 @@ fn draw_mesh_part(mesh: &Arc<Model>, mesh_index: usize, part_index: usize, sk: O
 
         mat.apply();
 
-        mat.shader.set_uniform_vec4("shR", sh_r);
-        mat.shader.set_uniform_vec4("shG", sh_g);
-        mat.shader.set_uniform_vec4("shB", sh_b);
-        mat.shader.set_uniform_mat4("localToWorld", local_to_world);
-        mat.shader.set_uniform_mat4("mvp", mvp);
+        mat.shader.resource.set_uniform_vec4("shR", sh_r);
+        mat.shader.resource.set_uniform_vec4("shG", sh_g);
+        mat.shader.resource.set_uniform_vec4("shB", sh_b);
+        mat.shader.resource.set_uniform_mat4("localToWorld", local_to_world);
+        mat.shader.resource.set_uniform_mat4("mvp", mvp);
 
         unsafe {
             gl::FrontFace(part.winding);
@@ -239,7 +239,7 @@ fn draw_mesh_part(mesh: &Arc<Model>, mesh_index: usize, part_index: usize, sk: O
             gl::BindBuffer(gl::ARRAY_BUFFER, vtx_buffer.handle());
             gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, idx_buffer.handle());
 
-            MeshVertex::setup_vtx_arrays(&mat.shader);
+            MeshVertex::setup_vtx_arrays(&mat.shader.resource);
 
             // draw geometry
             gl::DrawElements(part.topology, part.indices.len() as i32, gl::UNSIGNED_SHORT, 0 as *const _);

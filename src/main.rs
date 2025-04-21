@@ -461,7 +461,7 @@ fn main() {
     sdl_video.gl_set_swap_interval(1).unwrap();
 
     // test: load effect
-    let _test_effect = load_effect("content/effects/fire.ron").unwrap();
+    let _test_effect = load_effect("content/effects/fire.fx.ron").unwrap();
 
     // create game state
     let mut game_state = GameState::new();

@@ -2,10 +2,44 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::{asset_loader::{load_material, load_model}, graphics::{anim::{AnimationCurveInterpolationMode, AnimationCurvePoint, Color32Curve, FloatCurve, Vector2Curve, Vector3Curve}, material::Material, model::Model}, math::{Vector2, Vector3}, misc::Color32, parse_utils::{parse_color32, parse_vec2, parse_vec3}};
+use crate::{asset_loader::{load_material, load_model, load_shader, load_texture}, graphics::{anim::{AnimationCurveInterpolationMode, AnimationCurvePoint, Color32Curve, FloatCurve, Vector2Curve, Vector3Curve}, material::Material, model::Model, shader::Shader, texture::Texture}, math::{Vector2, Vector3, Vector4}, misc::Color32, parse_utils::{parse_color32, parse_vec2, parse_vec3, parse_vec4}};
 
 pub struct SerializedResource<T> {
     pub resource: Arc<T>
+}
+
+impl<T> Clone for SerializedResource<T> {
+    fn clone(&self) -> Self {
+        Self { resource: self.resource.clone() }
+    }
+}
+
+impl<'de> Deserialize<'de> for SerializedResource<Texture> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: serde::Deserializer<'de> {
+        let s = String::deserialize(deserializer)?;
+        let m = match load_texture(&s) {
+            Ok(m) => m,
+            Err(_) => {
+                return Err(serde::de::Error::custom("Failed loading resource"))
+            }
+        };
+
+        Ok(SerializedResource { resource: m })
+    }
+}
+
+impl<'de> Deserialize<'de> for SerializedResource<Shader> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: serde::Deserializer<'de> {
+        let s = String::deserialize(deserializer)?;
+        let m = match load_shader(&s) {
+            Ok(m) => m,
+            Err(_) => {
+                return Err(serde::de::Error::custom("Failed loading resource"))
+            }
+        };
+
+        Ok(SerializedResource { resource: m })
+    }
 }
 
 impl<'de> Deserialize<'de> for SerializedResource<Material> {
@@ -52,6 +86,16 @@ impl<'de> Deserialize<'de> for Vector3 {
         match parse_vec3(&s) {
             Ok(v) => Ok(v),
             Err(_) => Err(serde::de::Error::custom("Failed parsing Vector3"))
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Vector4 {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: serde::Deserializer<'de> {
+        let s = String::deserialize(deserializer)?;
+        match parse_vec4(&s) {
+            Ok(v) => Ok(v),
+            Err(_) => Err(serde::de::Error::custom("Failed parsing Vector4"))
         }
     }
 }
