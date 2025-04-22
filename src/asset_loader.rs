@@ -3,9 +3,10 @@ use std::{collections::HashMap, fs::{self, File}, io::{Error, Read}, marker::Pha
 use basis_universal::{TranscodeParameters, Transcoder, TranscoderTextureFormat};
 use gltf::{import_buffers, Gltf};
 use lazy_static::lazy_static;
+use qoi::decode_to_vec;
 use toml::Table;
 
-use crate::{effect::effect_data::EffectData, graphics::{material::Material, model::Model, shader::Shader, texture::{Texture, TextureFormat}}};
+use crate::{effect::effect_data::EffectData, graphics::{material::Material, model::Model, shader::Shader, texture::{Texture, TextureFormat}}, misc::Color32};
 
 lazy_static! {
     static ref TEXTURE_CACHE: RwLock<TextureCache> = RwLock::new(TextureCache::new());
@@ -88,42 +89,77 @@ impl ResourceLoader<Texture> for TextureLoader {
         let mut tex_data = Vec::new();
         tex_file.read_to_end(&mut tex_data).unwrap();
 
-        // create transcoder
-        let mut transcoder = Transcoder::new();
-        transcoder.prepare_transcoding(&tex_data).unwrap();
+        if path.ends_with(".basis") {
+            // create transcoder
+            let mut transcoder = Transcoder::new();
+            transcoder.prepare_transcoding(&tex_data).unwrap();
 
-        let img_info = transcoder.image_info(&tex_data, 0).unwrap();
+            let img_info = transcoder.image_info(&tex_data, 0).unwrap();
 
-        #[cfg(feature = "use_etc1")]
-        let (target_fmt, basis_fmt) = (TextureFormat::ETC1, TranscoderTextureFormat::ETC1_RGB);
+            #[cfg(feature = "use_etc1")]
+            let (target_fmt, basis_fmt) = (TextureFormat::ETC1, TranscoderTextureFormat::ETC1_RGB);
 
-        #[cfg(not(feature = "use_etc1"))]
-        let (target_fmt, basis_fmt) = (TextureFormat::DXT1, TranscoderTextureFormat::BC1_RGB);
+            #[cfg(not(feature = "use_etc1"))]
+            let (target_fmt, basis_fmt) = (TextureFormat::DXT1, TranscoderTextureFormat::BC1_RGB);
 
-        let mut tex = Texture::new(
-            target_fmt,
-            img_info.m_width as i32,
-            img_info.m_height as i32,
-            img_info.m_total_levels as i32
-        );
+            let mut tex = Texture::new(
+                target_fmt,
+                img_info.m_width as i32,
+                img_info.m_height as i32,
+                img_info.m_total_levels as i32
+            );
 
-        // upload each mip slice
-        for tex_level in 0..img_info.m_total_levels {
-            // transcode mip level
-            let data = transcoder.transcode_image_level(&tex_data, basis_fmt,
-                TranscodeParameters {
-                    image_index: 0,
-                    level_index: tex_level,
-                    decode_flags: None,
-                    output_row_pitch_in_blocks_or_pixels: None,
-                    output_rows_in_pixels: None
-                }
-            ).unwrap();
+            // upload each mip slice
+            for tex_level in 0..img_info.m_total_levels {
+                // transcode mip level
+                let data = transcoder.transcode_image_level(&tex_data, basis_fmt,
+                    TranscodeParameters {
+                        image_index: 0,
+                        level_index: tex_level,
+                        decode_flags: None,
+                        output_row_pitch_in_blocks_or_pixels: None,
+                        output_rows_in_pixels: None
+                    }
+                ).unwrap();
 
-            tex.set_texture_data(tex_level as i32, &data);
+                tex.set_texture_data(tex_level as i32, &data);
+            }
+
+            Ok(tex)
         }
+        else if path.ends_with(".qoi") {
+            let (header, decoded) = match decode_to_vec(tex_data) {
+                Ok(v) => v,
+                Err(e) => {
+                    println!("Failed decoding QOI image: {:?}", e);
+                    return Err(ResourceError::ParseError);
+                },
+            };
 
-        Ok(tex)
+            let pixels = match header.channels {
+                qoi::Channels::Rgb => {
+                    decoded.chunks_exact(3).map(|x| Color32::new(x[0], x[1], x[2], 255)).collect::<Vec<_>>()
+                },
+                qoi::Channels::Rgba => {
+                    decoded.chunks_exact(4).map(|x| Color32::new(x[0], x[1], x[2], x[3])).collect::<Vec<_>>()
+                }
+            };
+
+            let mut tex = Texture::new(
+                TextureFormat::RGBA8888,
+                header.width as i32,
+                header.height as i32,
+                1
+            );
+
+            tex.set_texture_data(0, &pixels);
+
+            Ok(tex)
+        }
+        else {
+            println!("Unsupported texture format");
+            Err(ResourceError::ParseError)
+        }
     }
 }
 

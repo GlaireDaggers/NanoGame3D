@@ -66,12 +66,15 @@ impl Texture {
         unsafe {
             gl::BindTexture(gl::TEXTURE_2D, self.handle);
 
+            let mip_w = (self.w >> level).max(1);
+            let mip_h = (self.h >> level).max(1);
+
             if self.is_compressed {
                 let data_size = data.len() * size_of::<T>();
-                gl_checked!{ gl::CompressedTexImage2D(gl::TEXTURE_2D, level, self.gl_internal_fmt, self.w >> level, self.h >> level, 0, data_size as i32, data.as_ptr() as *const _) }
+                gl_checked!{ gl::CompressedTexImage2D(gl::TEXTURE_2D, level, self.gl_internal_fmt, mip_w, mip_h, 0, data_size as i32, data.as_ptr() as *const _) }
             }
             else {
-                gl_checked!{ gl::TexSubImage2D(gl::TEXTURE_2D, level, 0, 0, self.w >> level, self.h >> level, self.gl_fmt, self.gl_type, data.as_ptr() as *const _) }
+                gl_checked!{ gl::TexSubImage2D(gl::TEXTURE_2D, level, 0, 0, mip_w, mip_h, self.gl_fmt, self.gl_type, data.as_ptr() as *const _) }
             }
         }
     }

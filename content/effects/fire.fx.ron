@@ -4,11 +4,9 @@
         // flames
         (
             emit: (
-                max_particles: 1024,
-                max_bursts: 0,
+                max_particles: 32,
                 particles_per_burst: 1,
-                burst_interval: 0.1,
-                world_space: false,
+                burst_interval: 0.25,
                 shape: Sphere (
                     origin: "0 0 0",
                     inner_radius: 0,
@@ -16,8 +14,8 @@
                 ),
             ),
             init: (
-                lifetime_min: 1,
-                lifetime_max: 1.5,
+                lifetime_min: 1.5,
+                lifetime_max: 2,
                 angle_min: 0,
                 angle_max: 360,
                 angle_axis: "0 0 1",
@@ -28,9 +26,11 @@
                 velocity_max: 10,
                 angular_velocity_min: -90,
                 angular_velocity_max: 90,
+                scale_min: 15.0,
+                scale_max: 20.0,
             ),
             accel: (
-                gravity: "0 0 5",
+                gravity: "0 0 50",
                 linear_damp: 0,
                 angular_damp: 0,
                 radial_accel: 0,
@@ -39,13 +39,20 @@
             ),
             display: Sprite (
                 material: "content/materials/effects/fire.mat.ron",
+                sheet: (
+                    rows: 8,
+                    columns: 8,
+                    random_start: false,
+                    timescale: 1.0,
+                ),
                 size: [
-                    ( time: 0.0, value: "1 1" ),
-                    ( time: 1.0, value: "2 2" ),
+                    ( time: 0.0, value: "1 2" ),
+                    ( time: 1.0, value: "2 4" ),
                 ],
                 color: [
-                    ( time: 0.0, value: "255 255 255 255" ),
-                    ( time: 1.0, value: "255 255 255 0" ),
+                    ( time: 0.0, value: "255 255 255 0" ),
+                    ( time: 0.1, value: "255 255 255 255" ),
+                    ( time: 1.0, value: "255 0 0 0" ),
                 ],
             ),
         )

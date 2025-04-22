@@ -734,6 +734,18 @@ impl Matrix4x4 {
 
         return mat;
     }
+
+    pub fn transform_point(self: Matrix4x4, point: Vector3) -> Vector3 {
+        let v4 = Vector4::new(point.x, point.y, point.z, 1.0);
+        let v4 = self * v4;
+        Vector3::new(v4.x, v4.y, v4.z)
+    }
+
+    pub fn transform_direction(self: Matrix4x4, direction: Vector3) -> Vector3 {
+        let v4 = Vector4::new(direction.x, direction.y, direction.z, 0.0);
+        let v4 = self * v4;
+        Vector3::new(v4.x, v4.y, v4.z).normalized()
+    }
 }
 
 impl ops::Mul<Vector4> for Matrix4x4 {

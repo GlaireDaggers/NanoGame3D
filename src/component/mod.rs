@@ -13,3 +13,4 @@ pub mod light;
 pub mod rendermesh;
 pub mod meshpose;
 pub mod basicanim;
+pub mod effect;

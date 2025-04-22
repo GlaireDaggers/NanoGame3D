@@ -4,7 +4,7 @@ use hecs::World;
 use lazy_static::lazy_static;
 use rayon::prelude::*;
 
-use crate::{bsp::{bspcommon::{aabb_frustum, coord_space_transform, extract_frustum, transform_aabb}, bspfile::{BspFile, LSHProbeSample}, bsprenderer::BspMapRenderer}, component::{camera::Camera, mapmodel::MapModel, meshpose::MeshPose, rendermesh::{RenderMesh, SkinnedMesh}, transform3d::Transform3D}, graphics::model::{MeshVertex, Model, ModelSkin}, math::{Matrix4x4, Vector4}, misc::AABB, MapData, TimeData, WindowData};
+use crate::{bsp::{bspcommon::{aabb_frustum, coord_space_transform, extract_frustum, transform_aabb}, bspfile::{BspFile, LSHProbeSample}, bsprenderer::BspMapRenderer}, component::{camera::Camera, effect::Effect, mapmodel::MapModel, meshpose::MeshPose, rendermesh::{RenderMesh, SkinnedMesh}, transform3d::Transform3D}, graphics::model::{MeshVertex, Model, ModelSkin}, math::{Matrix4x4, Vector4}, misc::AABB, MapData, TimeData, WindowData};
 
 pub const NUM_CUSTOM_LIGHT_LAYERS: usize = 30;
 pub const CUSTOM_LIGHT_LAYER_START: usize = 32;
@@ -279,6 +279,9 @@ pub fn render_system(time: &TimeData, window_data: &WindowData, map_data: &mut M
         .iter()
         .collect::<Vec<_>>();
 
+    // gather effects
+    let mut effect_iter = world.query::<(&mut Effect, &Transform3D)>();
+
     // gather cameras
     let mut camera_iter = world.query::<(&Transform3D, &Camera)>();
     let cameras = camera_iter
@@ -453,6 +456,20 @@ pub fn render_system(time: &TimeData, window_data: &WindowData, map_data: &mut M
         for (mvp, local_to_world, sh_r, sh_g, sh_b, model, mesh_idx, part_idx, entity_idx, skin_index, _) in transparent_sk_meshes {
             let sk = sk_meshes[entity_idx].1.2;
             draw_mesh_part(&model, mesh_idx, part_idx, Some(sk), sh_r, sh_g, sh_b, local_to_world, mvp, skin_index);
+        }
+
+        // draw effects
+        for (_, (effect, transform)) in &mut effect_iter {
+            if effect.world_space {
+                effect.instance.render(cam_view, cam_proj);
+            }
+            else {
+                let effect_transform = Matrix4x4::scale(transform.scale)
+                    * Matrix4x4::rotation(transform.rotation)
+                    * Matrix4x4::translation(transform.position);
+                
+                effect.instance.render(effect_transform * cam_view, cam_proj);
+            }
         }
 
         camera_index += 1;

@@ -35,7 +35,6 @@ pub struct EffectEmission {
     pub max_bursts: Option<u32>,
     pub particles_per_burst: u32,
     pub burst_interval: f32,
-    pub world_space: bool,
     pub shape: EffectEmissionShape,
 }
 
@@ -53,6 +52,8 @@ pub struct EffectInit {
     pub velocity_max: f32,
     pub angular_velocity_min: f32,
     pub angular_velocity_max: f32,
+    pub scale_min: f32,
+    pub scale_max: f32,
 }
 
 #[derive(Deserialize)]
