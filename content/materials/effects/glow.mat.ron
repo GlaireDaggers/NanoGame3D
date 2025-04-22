@@ -1,0 +1,17 @@
+#![enable(implicit_some)]
+(
+    shader: "content/shaders/default_particle.toml",
+    transparent: true,
+    blend: true,
+    blend_src: SrcAlpha,
+    blend_dst: One,
+    depth_write: false,
+    params: {
+        "mainTexture": Texture ((
+            texture: "content/textures/effects/glow.basis",
+            filter: true,
+            wrap_s: false,
+            wrap_t: false,
+        ))
+    }
+)

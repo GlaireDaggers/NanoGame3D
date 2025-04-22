@@ -64,6 +64,7 @@ struct GameState {
     world: World,
     time_data: TimeData,
     test_model: Entity,
+    test_fx: Entity,
     map_data: Option<MapData>,
     rng: ThreadRng,
 }
@@ -353,7 +354,7 @@ impl GameState {
 
         // test particle system
         let particle_sys = load_effect("content/effects/fire.fx.ron").unwrap();
-        world.spawn((
+        let test_fx = world.spawn((
             Transform3D::default().with_position(Vector3::new(0.0, 0.0, 50.0)),
             Effect::new(&particle_sys, true, true) 
         ));
@@ -363,6 +364,7 @@ impl GameState {
             time_data: TimeData::default(),
             map_data: Some(map_data),
             test_model,
+            test_fx,
             rng: rand::rng(),
         }
     }
@@ -393,6 +395,9 @@ impl GameState {
         {
             let mut test_model_transform = self.world.get::<&mut Transform3D>(self.test_model).unwrap();
             test_model_transform.position = Vector3::new((self.time_data.total_time * 0.1).sin() * 150.0, (self.time_data.total_time * 0.25).sin() * 150.0, 50.0);
+
+            let mut test_fx_transform = self.world.get::<&mut Transform3D>(self.test_fx).unwrap();
+            test_fx_transform.position = test_model_transform.position;
 
             let mut test_model_anim = self.world.get::<&mut BasicLerpAnim>(self.test_model).unwrap();
             test_model_anim.mix = (self.time_data.total_time * 0.5).sin() * 0.5 + 0.5;

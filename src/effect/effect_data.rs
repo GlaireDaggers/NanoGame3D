@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::{graphics::{anim::{Color32Curve, Vector2Curve}, material::Material}, math::Vector3, serialization::SerializedResource};
+use crate::{graphics::{anim::{Color32Curve, Vector2Curve}, material::Material}, math::{Quaternion, Vector3}, serialization::SerializedResource};
 
 #[derive(Deserialize)]
 pub enum EffectEmissionShape {
@@ -8,6 +8,13 @@ pub enum EffectEmissionShape {
     Box { origin: Vector3, extents: Vector3 },
     Sphere { origin: Vector3, inner_radius: f32, outer_radius: f32 },
     Ring { origin: Vector3, axis: Vector3, inner_radius: f32, outer_radius: f32 }
+}
+
+#[derive(Deserialize)]
+pub struct ParticleNoise {
+    pub seed: u32,
+    pub frequency: f32,
+    pub force: f32,
 }
 
 #[derive(Deserialize)]
@@ -19,10 +26,19 @@ pub struct EffectSpritesheet {
 }
 
 #[derive(Deserialize)]
+pub enum SpriteBillboardType {
+    None,
+    FaceCamera,
+    AlignVertical,
+    AlignVelocity,
+}
+
+#[derive(Deserialize)]
 pub enum EffectDisplay {
     None,
     Sprite {
         material: SerializedResource<Material>,
+        billboard: SpriteBillboardType,
         sheet: Option<EffectSpritesheet>,
         size: Vector2Curve,
         color: Color32Curve,
@@ -64,10 +80,13 @@ pub struct EffectAcceleration {
     pub radial_accel: f32,
     pub orbit_accel: f32,
     pub orbit_axis: Vector3,
+    pub noise: Option<ParticleNoise>,
 }
 
 #[derive(Deserialize)]
 pub struct EffectEmitter {
+    pub position: Vector3,
+    pub rotation: Quaternion,
     pub emit: EffectEmission,
     pub init: EffectInit,
     pub accel: EffectAcceleration,

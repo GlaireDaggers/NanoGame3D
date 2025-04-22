@@ -1,10 +1,11 @@
 use std::{mem::offset_of, ops::Range, sync::Arc};
 
+use noise::{NoiseFn, Simplex};
 use rand::{distr::uniform::SampleUniform, rngs::ThreadRng, Rng};
 
 use crate::{bsp::bspcommon::coord_space_transform, graphics::{buffer::Buffer, shader::Shader}, math::{Matrix4x4, Quaternion, Vector2, Vector3, Vector4}, misc::Color32};
 
-use super::effect_data::{EffectData, EffectDisplay, EffectEmitter};
+use super::effect_data::{EffectData, EffectDisplay, EffectEmitter, SpriteBillboardType};
 
 #[derive(Clone, Copy)]
 pub struct ParticleVertex {
@@ -19,7 +20,7 @@ struct Particle {
     pub lifetime_delta: f32,
     pub position: Vector3,
     pub angle: f32,
-    pub angle_axis: Vector3,
+    pub _angle_axis: Vector3, // todo: will be used for mesh particles
     pub velocity: Vector3,
     pub angular_velocity: f32,
     pub scale: f32,
@@ -38,8 +39,10 @@ struct EffectEmitterInstance {
     pub transform: Matrix4x4,
     pub particles: Vec<Particle>,
     pub renderer: EffectEmitterRenderer,
+    noise: Option<(f32, f32, Simplex, Simplex, Simplex)>,
     emit_timer: f32,
     burst_count: u32,
+    time: f32,
 }
 
 pub struct EffectInstance {
@@ -151,7 +154,7 @@ impl EffectEmitterInstance {
             lifetime_delta: 1.0 / lifetime,
             position,
             angle,
-            angle_axis,
+            _angle_axis: angle_axis,
             velocity,
             angular_velocity,
             scale
@@ -196,6 +199,8 @@ impl EffectEmitterInstance {
     }
 
     pub fn update_sim(self: &mut EffectEmitterInstance, data: &EffectEmitter, parent_transform: Matrix4x4, delta: f32) {
+        self.time += delta;
+
         let xform = self.transform * parent_transform;
         let origin = Vector3::new(xform.m[3][0], xform.m[3][1], xform.m[3][2]);
 
@@ -222,6 +227,17 @@ impl EffectEmitterInstance {
                 }
             }
 
+            match self.noise {
+                Some((freq, force, sx, sy, sz)) => {
+                    let sample_pos = (p.position + Vector3::new(self.time, self.time, self.time)) / freq;
+                    let nx = sx.get([sample_pos.x as f64, sample_pos.y as f64, sample_pos.z as f64]) as f32;
+                    let ny = sy.get([sample_pos.x as f64, sample_pos.y as f64, sample_pos.z as f64]) as f32;
+                    let nz = sz.get([sample_pos.x as f64, sample_pos.y as f64, sample_pos.z as f64]) as f32;
+                    p.velocity = p.velocity + (Vector3::new(nx, ny, nz) * force);
+                },
+                None => {}
+            };
+
             p.velocity = p.velocity - (p.velocity * data.accel.linear_damp);
             p.angular_velocity = p.angular_velocity - (p.angular_velocity * data.accel.angular_damp);
 
@@ -237,25 +253,68 @@ impl EffectEmitterInstance {
             EffectEmitterRenderer::None => {
             },
             EffectEmitterRenderer::Sprite { vertices, vertex_buffer, index_buffer } => {
-                let (mat, sheet, size_curve, color_curve) = match r {
+                let (mat, sheet, size_curve, color_curve, billboard) = match r {
                     EffectDisplay::None => unreachable!(),
-                    EffectDisplay::Sprite { material, sheet, size, color } => (material, sheet, size, color),
+                    EffectDisplay::Sprite { material, sheet, size, color, billboard } => (material, sheet, size, color, billboard),
                 };
 
-                // extract camera up, and right vectors
+                // extract camera fwd, up, and right vectors
+                let cam_fwd = Vector3::new(modelview.m[0][1], modelview.m[1][1], modelview.m[2][1]);
                 let cam_up = Vector3::new(modelview.m[0][2], modelview.m[1][2], modelview.m[2][2]);
                 let cam_right = Vector3::new(modelview.m[0][0], modelview.m[1][0], modelview.m[2][0]);
+
+                let align_vertical_fwd = Vector3::new(cam_fwd.x, cam_fwd.y, 0.0).normalized();
 
                 vertices.clear();
 
                 for p in &self.particles {
+                    // calculate billboard basis vectors
+                    let (bx, by, br) = match billboard {
+                        SpriteBillboardType::None => {
+                            (
+                                Vector3::unit_x(),
+                                Vector3::unit_z(),
+                                Vector3::unit_y()
+                            )
+                        },
+                        SpriteBillboardType::FaceCamera => {
+                            (
+                                cam_right,
+                                cam_up,
+                                cam_fwd
+                            )
+                        },
+                        SpriteBillboardType::AlignVertical => {
+                            (
+                                cam_right,
+                                Vector3::unit_z(),
+                                align_vertical_fwd,
+                            )
+                        },
+                        SpriteBillboardType::AlignVelocity => {
+                            let up = p.velocity.normalized();
+                            let right = cam_fwd.cross(up).normalized();
+                            let fwd = up.cross(right).normalized();
+                            (
+                                right,
+                                up,
+                                fwd
+                            )
+                        }
+                    };
+                    
+                    // rotate basis vectors around rotation axis
+                    let rot = Quaternion::from_axis_angle(br, p.angle.to_radians());
+                    let bx = rot * bx;
+                    let by = rot * by;
+
                     let size = size_curve.sample(p.lifetime) * p.scale;
                     let color = color_curve.sample(p.lifetime);
 
-                    let vtx0 = p.position - (cam_right * size.x) + (cam_up * size.y);
-                    let vtx1 = p.position + (cam_right * size.x) + (cam_up * size.y);
-                    let vtx2 = p.position - (cam_right * size.x) - (cam_up * size.y);
-                    let vtx3 = p.position + (cam_right * size.x) - (cam_up * size.y);
+                    let vtx0 = p.position - (bx * size.x) + (by * size.y);
+                    let vtx1 = p.position + (bx * size.x) + (by * size.y);
+                    let vtx2 = p.position - (bx * size.x) - (by * size.y);
+                    let vtx3 = p.position + (bx * size.x) - (by * size.y);
 
                     let (uv_min, uv_max) = match sheet {
                         Some(v) => {
@@ -373,7 +432,14 @@ impl EffectInstance {
                 renderer,
                 emit_timer: 0.0,
                 burst_count: 0,
-                transform: Matrix4x4::identity()
+                transform: Matrix4x4::identity(),
+                noise: match &x.accel.noise {
+                    Some(v) => {
+                        Some((v.frequency, v.force, Simplex::new(v.seed), Simplex::new(v.seed + 1), Simplex::new(v.seed + 2)))
+                    },
+                    None => None
+                },
+                time: 0.0,
             }
         }).collect::<Vec<_>>();
 
@@ -383,6 +449,9 @@ impl EffectInstance {
     pub fn update(self: &mut EffectInstance, rng: &mut ThreadRng, delta: f32) {
         for (idx, em) in self.emitters.iter_mut().enumerate() {
             let emitter_data = &self.effect_data.emitters[idx];
+
+            em.transform = Matrix4x4::rotation(emitter_data.rotation) * Matrix4x4::translation(emitter_data.position);
+
             if self.enable_emit {
                 em.update_emit(emitter_data, self.transform, rng, delta);
             }

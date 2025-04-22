@@ -459,6 +459,16 @@ impl Quaternion {
         return Quaternion { x: 0.0, y: 0.0, z: 0.0, w: 1.0 };
     }
 
+    /// Construct a new quaternion from a rotation around the given axis
+    pub fn from_axis_angle(axis: Vector3, angle: f32) -> Quaternion {
+        return Quaternion {
+            x: axis.x * (angle * 0.5).sin(),
+            y: axis.y * (angle * 0.5).sin(),
+            z: axis.z * (angle * 0.5).sin(),
+            w: (angle * 0.5).cos(),
+        };
+    }
+
     /// Construct a new quaternion from the given rotations about each axis
     pub fn from_euler(euler_angles: Vector3) -> Quaternion {
         let cx = (euler_angles.x * 0.5).cos();
