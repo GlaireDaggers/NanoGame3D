@@ -356,7 +356,7 @@ impl GameState {
         let particle_sys = load_effect("content/effects/fire.fx.ron").unwrap();
         let test_fx = world.spawn((
             Transform3D::default().with_position(Vector3::new(0.0, 0.0, 50.0)),
-            Effect::new(&particle_sys, true, true) 
+            Effect::new(&particle_sys, true, true)
         ));
 
         GameState {
@@ -398,6 +398,7 @@ impl GameState {
 
             let mut test_fx_transform = self.world.get::<&mut Transform3D>(self.test_fx).unwrap();
             test_fx_transform.position = test_model_transform.position;
+            test_fx_transform.rotation = test_model_transform.rotation;
 
             let mut test_model_anim = self.world.get::<&mut BasicLerpAnim>(self.test_model).unwrap();
             test_model_anim.mix = (self.time_data.total_time * 0.5).sin() * 0.5 + 0.5;

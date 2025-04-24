@@ -46,6 +46,18 @@ pub enum EffectDisplay {
 }
 
 #[derive(Deserialize)]
+pub enum SubEmitterSpawn {
+    Start,
+    Stop,
+}
+
+#[derive(Deserialize)]
+pub struct SubEmitter {
+    pub spawn: SubEmitterSpawn,
+    pub emitter: EffectEmitter,
+}
+
+#[derive(Deserialize)]
 pub struct EffectEmission {
     pub max_particles: u32,
     pub max_bursts: Option<u32>,
@@ -91,6 +103,7 @@ pub struct EffectEmitter {
     pub init: EffectInit,
     pub accel: EffectAcceleration,
     pub display: EffectDisplay,
+    pub sub: Vec<SubEmitter>,
 }
 
 #[derive(Deserialize)]

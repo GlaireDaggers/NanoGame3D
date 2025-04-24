@@ -5,7 +5,7 @@ use rand::{distr::uniform::SampleUniform, rngs::ThreadRng, Rng};
 
 use crate::{bsp::bspcommon::coord_space_transform, graphics::{buffer::Buffer, shader::Shader}, math::{Matrix4x4, Quaternion, Vector2, Vector3, Vector4}, misc::Color32};
 
-use super::effect_data::{EffectData, EffectDisplay, EffectEmitter, SpriteBillboardType};
+use super::effect_data::{EffectData, EffectDisplay, EffectEmitter, SpriteBillboardType, SubEmitterSpawn};
 
 #[derive(Clone, Copy)]
 pub struct ParticleVertex {
@@ -14,16 +14,16 @@ pub struct ParticleVertex {
     pub color: Color32
 }
 
-#[derive(Clone, Copy)]
 struct Particle {
     pub lifetime: f32,
     pub lifetime_delta: f32,
     pub position: Vector3,
     pub angle: f32,
-    pub _angle_axis: Vector3, // todo: will be used for mesh particles
+    pub angle_axis: Vector3,
     pub velocity: Vector3,
     pub angular_velocity: f32,
     pub scale: f32,
+    pub sub_emitters: Vec<EffectEmitterInstance>,
 }
 
 enum EffectEmitterRenderer {
@@ -36,13 +36,16 @@ enum EffectEmitterRenderer {
 }
 
 struct EffectEmitterInstance {
-    pub transform: Matrix4x4,
-    pub particles: Vec<Particle>,
-    pub renderer: EffectEmitterRenderer,
+    enable_emit: bool,
+    index: usize,
+    transform: Matrix4x4,
+    particles: Vec<Particle>,
+    renderer: EffectEmitterRenderer,
     noise: Option<(f32, f32, Simplex, Simplex, Simplex)>,
     emit_timer: f32,
     burst_count: u32,
     time: f32,
+    sub_emitters: Vec<EffectEmitterInstance>,
 }
 
 pub struct EffectInstance {
@@ -71,6 +74,60 @@ impl ParticleVertex {
 }
 
 impl EffectEmitterInstance {
+    pub fn new(index: usize, data: &EffectEmitter) -> EffectEmitterInstance {
+        let num_particles = data.emit.max_particles as usize;
+
+        let renderer = match &data.display {
+            super::effect_data::EffectDisplay::None => EffectEmitterRenderer::None,
+            super::effect_data::EffectDisplay::Sprite { .. } => {
+                let num_vertices = num_particles * 4;
+                let num_indices = num_particles * 6;
+
+                // index buffer can just be pre-filled with indices
+                let mut indices = Vec::with_capacity(num_indices);
+
+                for i in 0..num_particles {
+                    let vtx_base = (i * 4) as u16;
+
+                    indices.push(vtx_base);
+                    indices.push(vtx_base + 1);
+                    indices.push(vtx_base + 2);
+
+                    indices.push(vtx_base + 1);
+                    indices.push(vtx_base + 3);
+                    indices.push(vtx_base + 2);
+                }
+
+                let mut index_buffer = Buffer::new((num_indices * size_of::<u16>()) as isize);
+                index_buffer.set_data(0, &indices);
+
+                EffectEmitterRenderer::Sprite {
+                    vertices: Vec::with_capacity(num_vertices),
+                    vertex_buffer: Buffer::new((num_vertices * size_of::<ParticleVertex>()) as isize),
+                    index_buffer,
+                }
+            },
+        };
+
+        EffectEmitterInstance {
+            enable_emit: true,
+            index,
+            particles: Vec::with_capacity(num_particles),
+            renderer,
+            emit_timer: 0.0,
+            burst_count: 0,
+            transform: Matrix4x4::identity(),
+            noise: match &data.accel.noise {
+                Some(v) => {
+                    Some((v.frequency, v.force, Simplex::new(v.seed), Simplex::new(v.seed + 1), Simplex::new(v.seed + 2)))
+                },
+                None => None
+            },
+            time: 0.0,
+            sub_emitters: Vec::new()
+        }
+    }
+
     fn random_range<T>(rng: &mut ThreadRng, range: Range<T>) -> T where T : SampleUniform + PartialOrd {
         if range.is_empty() {
             return range.start;
@@ -149,19 +206,36 @@ impl EffectEmitterInstance {
         let angular_velocity = Self::random_range(rng, data.init.angular_velocity_min .. data.init.angular_velocity_max);
         let scale = Self::random_range(rng, data.init.scale_min .. data.init.scale_max);
 
+        let mut sub_emitters = Vec::new();
+
+        // create any sub-emitters with spawn type set to Start
+        for (idx, sub) in data.sub.iter().enumerate() {
+            match sub.spawn {
+                SubEmitterSpawn::Start => {
+                    sub_emitters.push(EffectEmitterInstance::new(idx, &sub.emitter));
+                },
+                SubEmitterSpawn::Stop => {}
+            };
+        }
+
         Particle {
             lifetime: 0.0,
             lifetime_delta: 1.0 / lifetime,
             position,
             angle,
-            _angle_axis: angle_axis,
+            angle_axis,
             velocity,
             angular_velocity,
-            scale
+            scale,
+            sub_emitters,
         }
     }
 
     pub fn update_emit(self: &mut EffectEmitterInstance, data: &EffectEmitter, parent_transform: Matrix4x4, rng: &mut ThreadRng, delta: f32) {
+        if !self.enable_emit {
+            return;
+        }
+
         // don't emit if we've hit max burst count
         if let Some(max_burst) = data.emit.max_bursts {
             if self.burst_count >= max_burst {
@@ -175,7 +249,7 @@ impl EffectEmitterInstance {
 
         self.emit_timer += delta;
 
-        while self.emit_timer >= data.emit.burst_interval {
+        if self.emit_timer >= data.emit.burst_interval {
             // emit new particles
             for _ in 0..data.emit.particles_per_burst {
                 let p = self.emit_particle(data, parent_transform, rng);
@@ -195,6 +269,22 @@ impl EffectEmitterInstance {
 
             self.emit_timer -= data.emit.burst_interval;
             self.burst_count += 1;
+        }
+
+        // update sub emitters
+        for sub in &mut self.sub_emitters {
+            let sub_data = &data.sub[sub.index];
+            sub.update_emit(&sub_data.emitter, Matrix4x4::identity(), rng, delta);
+        }
+
+        for p in &mut self.particles {
+            for sub in &mut p.sub_emitters {
+                let sub_data = &data.sub[sub.index];
+                sub.transform = Matrix4x4::rotation(Quaternion::from_axis_angle(p.angle_axis, p.angle.to_radians()))
+                    * Matrix4x4::translation(p.position)
+                    * self.transform;
+                sub.update_emit(&sub_data.emitter, Matrix4x4::identity(), rng, delta);
+            }
         }
     }
 
@@ -242,18 +332,62 @@ impl EffectEmitterInstance {
             p.angular_velocity = p.angular_velocity - (p.angular_velocity * data.accel.angular_damp);
 
             p.lifetime += p.lifetime_delta * delta;
+
+            // if the particle has reached its maximum lifetime, then create sub-emitters with a spawn type of Stop
+            // and orphan any emitters currently attached to the particle
+            if p.lifetime >= 1.0 {
+                for (idx, sub) in data.sub.iter().enumerate() {
+                    match sub.spawn {
+                        SubEmitterSpawn::Start => {},
+                        SubEmitterSpawn::Stop => {
+                            let mut em = EffectEmitterInstance::new(idx, &sub.emitter);
+                            em.transform = Matrix4x4::rotation(Quaternion::from_axis_angle(p.angle_axis, p.angle.to_radians()))
+                                * Matrix4x4::translation(p.position)
+                                * self.transform;
+                            self.sub_emitters.push(em);
+                        }
+                    };
+                }
+
+                for mut sub in p.sub_emitters.drain(0..) {
+                    sub.enable_emit = false;
+                    self.sub_emitters.push(sub);
+                }
+            }
         }
 
         // remove any particles which have reached max lifetime
         self.particles.retain(|x| x.lifetime < 1.0);
+
+        // update sub emitters
+        for sub in &mut self.sub_emitters {
+            let sub_data = &data.sub[sub.index];
+            sub.update_sim(&sub_data.emitter, Matrix4x4::identity(), delta);
+        }
+
+        for p in &mut self.particles {
+            for sub in &mut p.sub_emitters {
+                let sub_data = &data.sub[sub.index];
+                sub.transform = Matrix4x4::rotation(Quaternion::from_axis_angle(p.angle_axis, p.angle.to_radians()))
+                    * Matrix4x4::translation(p.position)
+                    * self.transform;
+                sub.update_sim(&sub_data.emitter, Matrix4x4::identity(), delta);
+            }
+        }
+
+        // remove any inactive sub emitters
+        self.sub_emitters.retain(|x| {
+            let sub_data = &data.sub[x.index];
+            x.active(&sub_data.emitter)
+        });
     }
 
-    pub fn render(self: &mut EffectEmitterInstance, r: &EffectDisplay, modelview: Matrix4x4, projection: Matrix4x4) {
+    pub fn render(self: &mut EffectEmitterInstance, data: &EffectEmitter, modelview: Matrix4x4, projection: Matrix4x4) {
         match &mut self.renderer {
             EffectEmitterRenderer::None => {
             },
             EffectEmitterRenderer::Sprite { vertices, vertex_buffer, index_buffer } => {
-                let (mat, sheet, size_curve, color_curve, billboard) = match r {
+                let (mat, sheet, size_curve, color_curve, billboard) = match &data.display {
                     EffectDisplay::None => unreachable!(),
                     EffectDisplay::Sprite { material, sheet, size, color, billboard } => (material, sheet, size, color, billboard),
                 };
@@ -387,68 +521,56 @@ impl EffectEmitterInstance {
                 }
             },
         };
+
+        // draw sub emitters
+        for sub in &mut self.sub_emitters {
+            let sub_data = &data.sub[sub.index];
+            sub.render(&sub_data.emitter, modelview, projection);
+        }
+
+        for p in &mut self.particles {
+            for sub in &mut p.sub_emitters {
+                let sub_data = &data.sub[sub.index];
+                sub.render(&sub_data.emitter, modelview, projection);
+            }
+        }
+    }
+
+    pub fn active(self: &EffectEmitterInstance, data: &EffectEmitter) -> bool {
+        if self.enable_emit {
+            if let Some(max_bursts) = data.emit.max_bursts {
+                if self.burst_count < max_bursts {
+                    return true;
+                }
+            }
+            else {
+                return true;
+            }   
+        }
+
+        for sub in &self.sub_emitters {
+            let sub_data = &data.sub[sub.index];
+            if sub.active(&sub_data.emitter) {
+                return true;
+            }
+        }
+
+        return self.particles.len() > 0;
     }
 }
 
 impl EffectInstance {
     pub fn new(data: &Arc<EffectData>, enable_emit: bool) -> EffectInstance {
-        let emitters = data.emitters.iter().map(|x| {
-            let num_particles = x.emit.max_particles as usize;
-
-            let renderer = match &x.display {
-                super::effect_data::EffectDisplay::None => EffectEmitterRenderer::None,
-                super::effect_data::EffectDisplay::Sprite { .. } => {
-                    let num_vertices = num_particles * 4;
-                    let num_indices = num_particles * 6;
-
-                    // index buffer can just be pre-filled with indices
-                    let mut indices = Vec::with_capacity(num_indices);
-
-                    for i in 0..num_particles {
-                        let vtx_base = (i * 4) as u16;
-
-                        indices.push(vtx_base);
-                        indices.push(vtx_base + 1);
-                        indices.push(vtx_base + 2);
-
-                        indices.push(vtx_base + 1);
-                        indices.push(vtx_base + 3);
-                        indices.push(vtx_base + 2);
-                    }
-
-                    let mut index_buffer = Buffer::new((num_indices * size_of::<u16>()) as isize);
-                    index_buffer.set_data(0, &indices);
-
-                    EffectEmitterRenderer::Sprite {
-                        vertices: Vec::with_capacity(num_vertices),
-                        vertex_buffer: Buffer::new((num_vertices * size_of::<ParticleVertex>()) as isize),
-                        index_buffer,
-                    }
-                },
-            };
-
-            EffectEmitterInstance {
-                particles: Vec::with_capacity(num_particles),
-                renderer,
-                emit_timer: 0.0,
-                burst_count: 0,
-                transform: Matrix4x4::identity(),
-                noise: match &x.accel.noise {
-                    Some(v) => {
-                        Some((v.frequency, v.force, Simplex::new(v.seed), Simplex::new(v.seed + 1), Simplex::new(v.seed + 2)))
-                    },
-                    None => None
-                },
-                time: 0.0,
-            }
+        let emitters = data.emitters.iter().enumerate().map(|(idx, em_data)| {
+            EffectEmitterInstance::new(idx, em_data)
         }).collect::<Vec<_>>();
 
         EffectInstance { transform: Matrix4x4::identity(), effect_data: data.clone(), enable_emit, emitters }
     }
 
     pub fn update(self: &mut EffectInstance, rng: &mut ThreadRng, delta: f32) {
-        for (idx, em) in self.emitters.iter_mut().enumerate() {
-            let emitter_data = &self.effect_data.emitters[idx];
+        for em in &mut self.emitters {
+            let emitter_data = &self.effect_data.emitters[em.index];
 
             em.transform = Matrix4x4::rotation(emitter_data.rotation) * Matrix4x4::translation(emitter_data.position);
 
@@ -460,9 +582,20 @@ impl EffectInstance {
     }
 
     pub fn render(self: &mut EffectInstance, modelview: Matrix4x4, projection: Matrix4x4) {
-        for (idx, em) in self.emitters.iter_mut().enumerate() {
-            let emitter_data = &self.effect_data.emitters[idx];
-            em.render(&emitter_data.display, modelview, projection);
+        for em in &mut self.emitters {
+            let emitter_data = &self.effect_data.emitters[em.index];
+            em.render(&emitter_data, modelview, projection);
         }
+    }
+
+    pub fn active(self: &EffectInstance) -> bool {
+        for em in &self.emitters {
+            let emitter_data = &self.effect_data.emitters[em.index];
+            if em.active(emitter_data) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
