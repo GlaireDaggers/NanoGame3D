@@ -143,6 +143,21 @@ impl GameState {
                         RenderMesh::new(model),
                     ));
                 }
+                "env_effect" => {
+                    let pos = parse_utils::parse_prop_vec3(&entity_data, "origin", Vector3::zero());
+                    let angles = parse_utils::parse_prop_vec3(&entity_data, "angles", Vector3::zero());
+                    let effect_path = parse_utils::get_prop_str(&entity_data, "effect", "");
+                    let scale = parse_utils::parse_prop_vec3(&entity_data, "scale", Vector3::new(1.0, 1.0, 1.0));
+                    let world_space = parse_utils::parse_prop::<i32>(&entity_data, "worldspace", 1) != 0;
+
+                    let rot = Quaternion::from_euler(Vector3::new(angles.x.to_radians(), angles.z.to_radians(), angles.y.to_radians()));
+                    let effect = load_effect(format!("content/{}", effect_path).as_str()).unwrap();
+
+                    world.spawn((
+                        Transform3D::default().with_position(pos).with_rotation(rot).with_scale(scale),
+                        Effect::new(&effect, true, world_space),
+                    ));
+                }
                 "light" => {
                     let light_pos = parse_utils::parse_prop_vec3(&entity_data, "origin", Vector3::zero());
                     let light_intensity = parse_utils::parse_prop::<f32>(&entity_data, "light", 300.0);

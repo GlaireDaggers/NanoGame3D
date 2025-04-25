@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::{graphics::{anim::{Color32Curve, Vector2Curve}, material::Material}, math::{Quaternion, Vector3}, serialization::SerializedResource};
+use crate::{graphics::{anim::{Color32Curve, Vector2Curve}, material::Material}, math::{Quaternion, Vector3}, misc::AABB, serialization::SerializedResource};
 
 #[derive(Deserialize)]
 pub enum EffectEmissionShape {
@@ -108,5 +108,6 @@ pub struct EffectEmitter {
 
 #[derive(Deserialize)]
 pub struct EffectData {
+    pub bounds: AABB,
     pub emitters: Vec<EffectEmitter>
 }

@@ -1,3 +1,5 @@
+use serde::Deserialize;
+
 use crate::math::{Vector3, Vector4};
 
 #[derive(Default, Clone, Copy)]
@@ -41,7 +43,7 @@ impl Rectangle {
     }
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, Deserialize)]
 pub struct AABB {
     pub center: Vector3,
     pub extents: Vector3,

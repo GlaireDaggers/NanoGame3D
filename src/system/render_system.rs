@@ -460,15 +460,19 @@ pub fn render_system(time: &TimeData, window_data: &WindowData, map_data: &mut M
 
         // draw effects
         for (_, (effect, transform)) in &mut effect_iter {
-            if effect.world_space {
-                effect.instance.render(cam_view, cam_proj);
-            }
-            else {
-                let effect_transform = Matrix4x4::scale(transform.scale)
-                    * Matrix4x4::rotation(transform.rotation)
-                    * Matrix4x4::translation(transform.position);
-                
-                effect.instance.render(effect_transform * cam_view, cam_proj);
+            let effect_transform = Matrix4x4::scale(transform.scale)
+                * Matrix4x4::rotation(transform.rotation)
+                * Matrix4x4::translation(transform.position);
+
+            let bounds = transform_aabb(&effect.instance.effect_data.bounds, effect_transform);
+
+            if aabb_frustum(&bounds, &frustum) && renderer.check_vis(&map_data.map, &bounds) {
+                if effect.world_space {
+                    effect.instance.render(cam_view, cam_proj);
+                }
+                else {
+                    effect.instance.render(effect_transform * cam_view, cam_proj);
+                }
             }
         }
 
