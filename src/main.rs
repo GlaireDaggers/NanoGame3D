@@ -1,6 +1,7 @@
 use std::ffi::CStr;
 
 use gamestate::{GameState, WindowData};
+use imgui::ConfigFlags;
 use imgui_render::Renderer;
 use imgui_sdl2_support::SdlPlatform;
 
@@ -72,12 +73,16 @@ fn main() {
 
     // create imgui context
     let mut imgui = imgui::Context::create();
+
     imgui.fonts()
         .add_font(&[imgui::FontSource::DefaultFontData { config: None }]);
 
     // create imgui platform & renderer
     let mut platform = SdlPlatform::new(&mut imgui);
     let mut imgui_renderer = Renderer::new(&mut imgui);
+
+    // crash on Pi Zero
+    imgui.io_mut().config_flags.insert(ConfigFlags::NO_MOUSE_CURSOR_CHANGE);
 
     // create game state
     let mut game_state = GameState::new();
