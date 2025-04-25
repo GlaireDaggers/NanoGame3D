@@ -1,6 +1,6 @@
 use hecs::World;
 
-use crate::{bsp::bspfile::BspFile, component::{flycam::FlyCam, fpview::FPView, playerinput::PlayerInput, transform3d::Transform3D}, math::{Matrix4x4, Quaternion, Vector3, Vector4}, InputState, TimeData};
+use crate::{bsp::bspfile::BspFile, component::{flycam::FlyCam, fpview::FPView, playerinput::PlayerInput, transform3d::Transform3D}, math::{Matrix4x4, Quaternion, Vector3, Vector4}, gamestate::{InputState, TimeData}};
 
 /// System which allows player to control a FlyCam
 pub fn flycam_system_update(input: &InputState, time: &TimeData, map: &BspFile, world: &mut World) {

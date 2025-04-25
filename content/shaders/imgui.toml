@@ -1,0 +1,27 @@
+vs = '''
+attribute vec2 in_position;
+attribute vec2 in_texcoord;
+attribute vec4 in_color;
+
+varying vec2 vtx_texcoord;
+varying vec4 vtx_color;
+
+uniform mat4 mvp;
+
+void main() {
+	gl_Position = mvp * vec4(in_position.xy, 0.0, 1.0);
+    vtx_texcoord = in_texcoord;
+    vtx_color = in_color;
+}
+'''
+
+ps = '''
+varying vec2 vtx_texcoord;
+varying vec4 vtx_color;
+
+uniform sampler2D mainTexture;
+
+void main() {
+    gl_FragColor = texture2D(mainTexture, vtx_texcoord) * vtx_color;
+}
+'''

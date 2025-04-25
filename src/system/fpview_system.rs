@@ -1,6 +1,6 @@
 use hecs::World;
 
-use crate::{component::{charactercontroller::{CharacterController, CharacterState}, fpview::FPView, playerinput::PlayerInput}, InputState, TimeData};
+use crate::{component::{charactercontroller::{CharacterController, CharacterState}, fpview::FPView, playerinput::PlayerInput}, gamestate::{InputState, TimeData}};
 
 const LOOK_SPEED: f32 = 90.0;
 const CROUCH_SPEED: f32 = 120.0;

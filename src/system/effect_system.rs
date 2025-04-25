@@ -1,7 +1,7 @@
 use hecs::World;
 use rand::rngs::ThreadRng;
 
-use crate::{component::{effect::Effect, transform3d::Transform3D}, math::Matrix4x4, TimeData};
+use crate::{component::{effect::Effect, transform3d::Transform3D}, math::Matrix4x4, gamestate::TimeData};
 
 /// System which updates particle effects
 pub fn effect_system(time: &TimeData, rng: &mut ThreadRng, world: &mut World) {

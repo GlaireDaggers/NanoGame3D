@@ -1,7 +1,7 @@
 use hecs::{CommandBuffer, World};
 use lazy_static::lazy_static;
 
-use crate::{bsp::{bspcommon::transform_aabb, bspfile::{BspFile, MASK_SOLID}}, component::{charactercontroller::{CharacterController, CharacterInputState, CharacterState}, collider::ColliderBounds, fpview::FPView, mapmodel::MapModel, playerinput::PlayerInput, transform3d::Transform3D}, math::{Matrix4x4, Quaternion, Vector3, Vector4}, misc::AABB, InputState, MapData, TimeData};
+use crate::{bsp::{bspcommon::transform_aabb, bspfile::{BspFile, MASK_SOLID}}, component::{charactercontroller::{CharacterController, CharacterInputState, CharacterState}, collider::ColliderBounds, fpview::FPView, mapmodel::MapModel, playerinput::PlayerInput, transform3d::Transform3D}, math::{Matrix4x4, Quaternion, Vector3, Vector4}, misc::AABB, gamestate::{InputState, MapData, TimeData}};
 
 const GROUND_SLOPE_ANGLE: f32 = 45.0;
 const STEP_HEIGHT: f32 = 20.0;

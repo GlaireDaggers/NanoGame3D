@@ -1,6 +1,6 @@
 use hecs::World;
 
-use crate::{component::{basicanim::{AnimationLoopMode, BasicAnim, BasicLerpAnim}, meshpose::{MeshPose, PoseBlendMode}, rendermesh::RenderMesh}, TimeData};
+use crate::{component::{basicanim::{AnimationLoopMode, BasicAnim, BasicLerpAnim}, meshpose::{MeshPose, PoseBlendMode}, rendermesh::RenderMesh}, gamestate::TimeData};
 
 /// system which samples basic animations & writes results into ModelPose's local pose
 pub fn basic_animation_system(time: &TimeData, world: &mut World) {

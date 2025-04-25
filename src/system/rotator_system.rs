@@ -1,6 +1,6 @@
 use hecs::World;
 
-use crate::{component::{rotator::Rotator, transform3d::Transform3D}, math::Quaternion, TimeData};
+use crate::{component::{rotator::Rotator, transform3d::Transform3D}, gamestate::TimeData, math::Quaternion};
 
 /// System which rotates entities with a Rotator component
 pub fn rotator_system_update(time: &TimeData, world: &mut World) {

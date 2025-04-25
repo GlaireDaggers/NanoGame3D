@@ -1,6 +1,6 @@
 use hecs::{CommandBuffer, World};
 
-use crate::{component::{door::{Door, DoorLink, DoorOpener}, mapmodel::MapModel, transform3d::Transform3D, triggerable::TriggerState}, MapData, TimeData};
+use crate::{component::{door::{Door, DoorLink, DoorOpener}, mapmodel::MapModel, transform3d::Transform3D, triggerable::TriggerState}, gamestate::{MapData, TimeData}};
 
 const DOOR_OPEN_RADIUS: f32 = 150.0;
 
