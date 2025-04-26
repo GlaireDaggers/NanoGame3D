@@ -4,7 +4,7 @@ use log::error;
 use hecs::{Entity, World};
 use shellwords::split;
 
-use crate::{asset_loader::{clear_all, load_effect}, component::{effect::Effect, transform3d::Transform3D}, math::Vector3};
+use crate::{asset_loader::{clear_all, load_effect}, component::{effect::Effect, transform3d::Transform3D}, cvar::{print_cvars, set_cvar}, math::Vector3};
 
 pub struct ConsoleCommandSystem {
     test_fx_id: Option<Entity>
@@ -37,6 +37,14 @@ impl ConsoleCommandSystem {
                 )
                 .subcommand(Command::new("clear-cache")
                     .about("Clear all resource caches")
+                )
+                .subcommand(Command::new("set")
+                    .arg(clap::arg!(<NAME> "Name of the CVAR"))
+                    .arg(clap::arg!(<VALUE> "Value to set"))
+                    .about("Set CVAR by name")
+                )
+                .subcommand(Command::new("cvarlist")
+                    .about("List all defined CVARs")
                 );
     
             match cmd.try_get_matches_from(args) {
@@ -74,6 +82,15 @@ impl ConsoleCommandSystem {
                         }
                         Some(("clear-cache", _)) => {
                             clear_all();
+                        }
+                        Some(("set", sub_args)) => {
+                            let name = sub_args.get_one::<String>("NAME").unwrap();
+                            let value = sub_args.get_one::<String>("VALUE").unwrap();
+
+                            set_cvar(&name, &value);
+                        }
+                        Some(("cvarlist", _)) => {
+                            print_cvars();
                         }
                         _ => unreachable!()
                     }

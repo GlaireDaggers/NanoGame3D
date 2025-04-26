@@ -1,5 +1,6 @@
 use core::f32;
 use std::ffi::CStr;
+use cvar::{define_cvar, get_cvar};
 use log::info;
 
 use consolewin::{ConsoleWindow, ConsoleWindowLogger};
@@ -34,6 +35,7 @@ pub mod gamestate;
 pub mod imgui_render;
 pub mod frametimer;
 pub mod consolewin;
+pub mod cvar;
 
 static LOGGER: ConsoleWindowLogger = ConsoleWindowLogger {
 };
@@ -41,6 +43,9 @@ static LOGGER: ConsoleWindowLogger = ConsoleWindowLogger {
 fn main() {
     log::set_logger(&LOGGER).unwrap();
     log::set_max_level(log::LevelFilter::Info);
+
+    // define CVARs
+    define_cvar::<bool>("show_fps", false, "Show FPS & frame time stats overlay");
 
     let sdl = sdl2::init().unwrap();
     let sdl_video = sdl.video().unwrap();
@@ -94,7 +99,7 @@ fn main() {
     let mut platform = SdlPlatform::new(&mut imgui);
     let mut imgui_renderer = Renderer::new(&mut imgui);
 
-    // crash on Pi Zero
+    // fix crash on Pi Zero
     imgui.io_mut().config_flags.insert(ConfigFlags::NO_MOUSE_CURSOR_CHANGE);
 
     // create game state
@@ -109,9 +114,7 @@ fn main() {
     let mut fps_timer = FrameTimer::new();
     let mut frame_timer = FrameTimer::new();
 
-    let mut show_fps_stats = false;
     let mut show_console = false;
-
     let mut console_window = ConsoleWindow::new(&imgui);
 
     let mut event_pump = sdl.event_pump().unwrap();
@@ -138,9 +141,6 @@ fn main() {
                 sdl2::event::Event::KeyDown { timestamp: _, window_id: _, keycode, scancode: _, keymod: _, repeat: _ } => {
                     if let Some(k) = keycode {
                         match k {
-                            Keycode::F11 => {
-                                show_fps_stats = !show_fps_stats;
-                            }
                             Keycode::Backquote => {
                                 show_console = !show_console;
                             }
@@ -190,7 +190,7 @@ fn main() {
         // draw ImGui
         let ui = imgui.new_frame();
 
-        if show_fps_stats {
+        if get_cvar::<bool>("show_fps") {
             // overlay: framerate
             let overlay_flags = imgui::WindowFlags::NO_DECORATION |
                 imgui::WindowFlags::ALWAYS_AUTO_RESIZE |
