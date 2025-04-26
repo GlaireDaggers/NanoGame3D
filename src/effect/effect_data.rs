@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::{graphics::{anim::{Color32Curve, Vector2Curve}, material::Material}, math::{Quaternion, Vector3}, misc::AABB, serialization::SerializedResource};
+use crate::{asset_loader::MaterialHandle, graphics::anim::{Color32Curve, Vector2Curve}, math::{Quaternion, Vector3}, misc::AABB, serialization::SerializedResource};
 
 #[derive(Deserialize)]
 pub enum EffectEmissionShape {
@@ -37,7 +37,7 @@ pub enum SpriteBillboardType {
 pub enum EffectDisplay {
     None,
     Sprite {
-        material: SerializedResource<Material>,
+        material: SerializedResource<MaterialHandle>,
         billboard: SpriteBillboardType,
         sheet: Option<EffectSpritesheet>,
         size: Vector2Curve,

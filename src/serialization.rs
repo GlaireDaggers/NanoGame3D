@@ -1,20 +1,29 @@
-use std::{fmt::Formatter, sync::Arc};
+use std::{fmt::Formatter, ops::{Deref, DerefMut}};
 
 use serde::{de::Visitor, Deserialize};
 
-use crate::{asset_loader::{load_material, load_model, load_shader, load_texture}, graphics::{anim::{AnimationCurveInterpolationMode, AnimationCurvePoint, Color32Curve, FloatCurve, Vector2Curve, Vector3Curve}, material::Material, model::Model, shader::Shader, texture::Texture}, math::{Quaternion, Vector2, Vector3, Vector4}, misc::Color32};
+use crate::{asset_loader::{load_material, load_model, load_shader, load_texture, MaterialHandle, ModelHandle, ShaderHandle, TextureHandle}, graphics::anim::{AnimationCurveInterpolationMode, AnimationCurvePoint, Color32Curve, FloatCurve, Vector2Curve, Vector3Curve}, math::{Quaternion, Vector2, Vector3, Vector4}, misc::Color32};
 
-pub struct SerializedResource<T> {
-    pub resource: Arc<T>
+#[derive(Clone)]
+pub struct SerializedResource<T> where T : Clone {
+    pub inner: T
 }
 
-impl<T> Clone for SerializedResource<T> {
-    fn clone(&self) -> Self {
-        Self { resource: self.resource.clone() }
+impl<T> Deref for SerializedResource<T> where T : Clone {
+    type Target = T;
+    
+    fn deref(&self) -> &Self::Target {
+        &self.inner
     }
 }
 
-impl<'de> Deserialize<'de> for SerializedResource<Texture> {
+impl<T> DerefMut for SerializedResource<T> where T : Clone {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
+impl<'de> Deserialize<'de> for SerializedResource<TextureHandle> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: serde::Deserializer<'de> {
         let s = String::deserialize(deserializer)?;
         let m = match load_texture(&s) {
@@ -24,11 +33,11 @@ impl<'de> Deserialize<'de> for SerializedResource<Texture> {
             }
         };
 
-        Ok(SerializedResource { resource: m })
+        Ok(SerializedResource { inner: m })
     }
 }
 
-impl<'de> Deserialize<'de> for SerializedResource<Shader> {
+impl<'de> Deserialize<'de> for SerializedResource<ShaderHandle> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: serde::Deserializer<'de> {
         let s = String::deserialize(deserializer)?;
         let m = match load_shader(&s) {
@@ -38,11 +47,11 @@ impl<'de> Deserialize<'de> for SerializedResource<Shader> {
             }
         };
 
-        Ok(SerializedResource { resource: m })
+        Ok(SerializedResource { inner: m })
     }
 }
 
-impl<'de> Deserialize<'de> for SerializedResource<Material> {
+impl<'de> Deserialize<'de> for SerializedResource<MaterialHandle> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: serde::Deserializer<'de> {
         let s = String::deserialize(deserializer)?;
         let m = match load_material(&s) {
@@ -52,11 +61,11 @@ impl<'de> Deserialize<'de> for SerializedResource<Material> {
             }
         };
 
-        Ok(SerializedResource { resource: m })
+        Ok(SerializedResource { inner: m })
     }
 }
 
-impl<'de> Deserialize<'de> for SerializedResource<Model> {
+impl<'de> Deserialize<'de> for SerializedResource<ModelHandle> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: serde::Deserializer<'de> {
         let s = String::deserialize(deserializer)?;
         let m = match load_model(&s) {
@@ -66,7 +75,7 @@ impl<'de> Deserialize<'de> for SerializedResource<Model> {
             }
         };
 
-        Ok(SerializedResource { resource: m })
+        Ok(SerializedResource { inner: m })
     }
 }
 

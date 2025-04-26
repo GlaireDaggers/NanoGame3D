@@ -8,3 +8,4 @@ pub mod door_system;
 pub mod triggerable_system;
 pub mod anim_system;
 pub mod effect_system;
+pub mod ccmd_system;

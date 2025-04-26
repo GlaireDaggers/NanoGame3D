@@ -1,4 +1,5 @@
 use std::{collections::HashMap, io::Seek};
+use log::info;
 
 use byteorder::{LittleEndian, ReadBytesExt};
 use regex::Regex;
@@ -511,7 +512,7 @@ impl NodeLump {
         let num_nodes = (info.length / 28) as usize;
         let mut nodes: Vec<Node> = Vec::with_capacity(num_nodes);
 
-        println!("Num nodes in node lump: {}", num_nodes);
+        info!("Num nodes in node lump: {}", num_nodes);
 
         for _ in 0..num_nodes {
             let plane = reader.read_u32::<LittleEndian>().unwrap();
@@ -546,7 +547,7 @@ impl LeafLump {
         let num_leaves = (info.length / 28) as usize;
         let mut leaves: Vec<Leaf> = Vec::with_capacity(num_leaves);
 
-        println!("Num leaves in leaf lump: {}", num_leaves);
+        info!("Num leaves in leaf lump: {}", num_leaves);
 
         for _ in 0..num_leaves {
             let brush_or = reader.read_u32::<LittleEndian>().unwrap();
@@ -621,7 +622,7 @@ impl TexInfoLump {
         let num_textures = (info.length / 76) as usize;
         let mut textures: Vec<TexInfo> = Vec::with_capacity(num_textures);
 
-        println!("Num textures in tex info lump: {}", num_textures);
+        info!("Num textures in tex info lump: {}", num_textures);
 
         for _ in 0..num_textures {
             let u_axis = read_vec3f(reader);
@@ -674,7 +675,7 @@ impl VisLump {
 
         let mut clusters: Vec<VisCluster> = Vec::with_capacity(num_clusters);
 
-        println!("Num clusters in vis lump: {}", num_clusters);
+        info!("Num clusters in vis lump: {}", num_clusters);
 
         for _ in 0..num_clusters {
             let pvs = reader.read_u32::<LittleEndian>().unwrap();
@@ -829,7 +830,7 @@ impl LSHGridLump {
         let num_y = grid_size.y as i32;
         let num_z = grid_size.z as i32;
 
-        println!("LSH Grid: {} x {} x {}", num_x, num_y, num_z);
+        info!("LSH Grid: {} x {} x {}", num_x, num_y, num_z);
 
         let num_total = num_x * num_y * num_z;
         let mut probes = Vec::with_capacity(num_total as usize);
@@ -1156,7 +1157,7 @@ impl BspFile {
             let lump_offset = reader.read_u32::<LittleEndian>().unwrap();
             let lump_length = reader.read_u32::<LittleEndian>().unwrap();
 
-            println!("BSPX Lump: {} (offs: {}, len: {})", lump_name, lump_offset, lump_length);
+            info!("BSPX Lump: {} (offs: {}, len: {})", lump_name, lump_offset, lump_length);
 
             let lump_info = BspLumpInfo { offset: lump_offset, length: lump_length };
             bspx_lumps.insert(lump_name, lump_info);

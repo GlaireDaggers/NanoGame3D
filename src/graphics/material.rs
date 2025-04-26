@@ -1,14 +1,12 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use serde::Deserialize;
 
-use crate::{math::{Vector2, Vector3, Vector4}, serialization::SerializedResource};
-
-use super::{shader::Shader, texture::Texture};
+use crate::{asset_loader::{ShaderHandle, TextureHandle}, math::{Vector2, Vector3, Vector4}, serialization::SerializedResource};
 
 #[derive(Deserialize, Clone)]
 pub struct TextureSampler {
-    pub texture: SerializedResource<Texture>,
+    pub texture: SerializedResource<TextureHandle>,
     pub filter: bool,
     pub wrap_s: bool,
     pub wrap_t: bool
@@ -116,7 +114,7 @@ pub enum MaterialParam {
 
 #[derive(Deserialize, Clone)]
 pub struct Material {
-    pub shader : SerializedResource<Shader>,
+    pub shader : SerializedResource<ShaderHandle>,
     
     #[serde(default)]
     pub transparent : bool,
@@ -149,9 +147,9 @@ pub struct Material {
 }
 
 impl Material {
-    pub fn new(shader: Arc<Shader>) -> Material {
+    pub fn new(shader: ShaderHandle) -> Material {
         Material {
-            shader: SerializedResource { resource: shader },
+            shader: SerializedResource { inner: shader },
             
             transparent: false,
             cull: CullMode::Back,
@@ -168,7 +166,7 @@ impl Material {
     }
 
     pub fn apply(self: &Self) {
-        self.shader.resource.set_active();
+        self.shader.inner.set_active();
 
         unsafe {
             match self.cull {
@@ -214,22 +212,22 @@ impl Material {
         for param in &self.params {
             match param.1 {
                 MaterialParam::Float(val) => {
-                    self.shader.resource.set_uniform_float(param.0, *val);
+                    self.shader.inner.set_uniform_float(param.0, *val);
                 },
                 MaterialParam::Vec2(val) => {
-                    self.shader.resource.set_uniform_vec2(param.0, *val);
+                    self.shader.inner.set_uniform_vec2(param.0, *val);
                 },
                 MaterialParam::Vec3(val) => {
-                    self.shader.resource.set_uniform_vec3(param.0, *val);
+                    self.shader.inner.set_uniform_vec3(param.0, *val);
                 },
                 MaterialParam::Vec4(val) => {
-                    self.shader.resource.set_uniform_vec4(param.0, *val);
+                    self.shader.inner.set_uniform_vec4(param.0, *val);
                 },
                 MaterialParam::Texture(val) => {
                     unsafe {
                         gl::ActiveTexture(gl::TEXTURE0 + cur_tex_slot);
         
-                        gl::BindTexture(gl::TEXTURE_2D, val.texture.resource.handle());
+                        gl::BindTexture(gl::TEXTURE_2D, val.texture.inner.handle());
         
                         if val.filter {
                             gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32);
@@ -255,7 +253,7 @@ impl Material {
                         }
                     }
         
-                    self.shader.resource.set_uniform_int(param.0, cur_tex_slot as i32);
+                    self.shader.inner.set_uniform_int(param.0, cur_tex_slot as i32);
                     cur_tex_slot += 1;
                 },
             }

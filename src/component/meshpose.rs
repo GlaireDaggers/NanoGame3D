@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::{graphics::model::{Model, ModelAnimationClip}, math::{Matrix4x4, Quaternion, Vector3}};
 
 use super::transform3d::Transform3D;
@@ -19,14 +17,14 @@ pub struct MeshPose {
 }
 
 impl MeshPose {
-    pub fn init(mesh: &Arc<Model>) -> MeshPose {
+    pub fn init(mesh: &Model) -> MeshPose {
         MeshPose {
             local_pose: vec![Transform3D::default();mesh.nodes.len()],
             pose: vec![Matrix4x4::identity();mesh.nodes.len()],
         }
     }
 
-    fn sample_pose(model: &Arc<Model>, anim: &ModelAnimationClip, time: f32, node_idx: usize) -> (Vector3, Quaternion, Vector3) {
+    fn sample_pose(model: &Model, anim: &ModelAnimationClip, time: f32, node_idx: usize) -> (Vector3, Quaternion, Vector3) {
         let node = &model.nodes[node_idx];
 
         if let Some(ch) = anim.channels.get(&node_idx) {
@@ -58,7 +56,7 @@ impl MeshPose {
         }
     }
 
-    fn sample_node_local(self: &mut Self, model: &Arc<Model>, node_idx: usize, anim: &ModelAnimationClip, time: f32, blend_mode: PoseBlendMode, amount: f32) {
+    fn sample_node_local(self: &mut Self, model: &Model, node_idx: usize, anim: &ModelAnimationClip, time: f32, blend_mode: PoseBlendMode, amount: f32) {
         let node_xform = Self::sample_pose(model, anim, time, node_idx);
 
         match blend_mode {
@@ -104,7 +102,7 @@ impl MeshPose {
         }
     }
 
-    fn sample_node_local_recursive(self: &mut Self, model: &Arc<Model>, node_idx: &mut usize, anim: &ModelAnimationClip, time: f32, blend_mode: PoseBlendMode, amount: f32) {
+    fn sample_node_local_recursive(self: &mut Self, model: &Model, node_idx: &mut usize, anim: &ModelAnimationClip, time: f32, blend_mode: PoseBlendMode, amount: f32) {
         self.sample_node_local(model, *node_idx, anim, time, blend_mode, amount);
 
         let node = &model.nodes[*node_idx];
@@ -114,7 +112,7 @@ impl MeshPose {
         }
     }
 
-    fn compute_node_transform(self: &mut Self, model: &Arc<Model>, parent_xform: Matrix4x4, node_idx: &mut usize) {
+    fn compute_node_transform(self: &mut Self, model: &Model, parent_xform: Matrix4x4, node_idx: &mut usize) {
         let node = &model.nodes[*node_idx];
 
         let node_xform = self.local_pose[*node_idx];
@@ -131,7 +129,7 @@ impl MeshPose {
         }
     }
 
-    pub fn sample(self: &mut Self, model: &Arc<Model>, root_node: Option<usize>, anim_id: usize, time: f32, blend_mode: PoseBlendMode, amount: f32) {
+    pub fn sample(self: &mut Self, model: &Model, root_node: Option<usize>, anim_id: usize, time: f32, blend_mode: PoseBlendMode, amount: f32) {
         let anim = &model.animations[anim_id];
 
         if let Some(root) = root_node {
@@ -146,7 +144,7 @@ impl MeshPose {
     }
 
     /// Compute transform matrices for each node based on currently stored local pose
-    pub fn compute_pose_transforms(self: &mut Self, model: &Arc<Model>) {
+    pub fn compute_pose_transforms(self: &mut Self, model: &Model) {
         let mut node_idx = 0;
         while node_idx < model.nodes.len() {
             self.compute_node_transform(model, Matrix4x4::identity(), &mut node_idx);

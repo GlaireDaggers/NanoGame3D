@@ -1,17 +1,17 @@
-use std::{mem::offset_of, sync::Arc};
+use std::mem::offset_of;
 
 use imgui::{DrawCmd, DrawVert};
 
-use crate::{asset_loader::load_material, graphics::{buffer::Buffer, material::Material, shader::Shader, texture::{Texture, TextureFormat}}, math::{Matrix4x4, Vector3}};
+use crate::{asset_loader::{load_material, MaterialHandle, ShaderHandle}, graphics::{buffer::Buffer, texture::{Texture, TextureFormat}}, math::{Matrix4x4, Vector3}};
 
 pub struct Renderer {
-    material: Arc<Material>,
+    material: MaterialHandle,
     vertex_buffer: Buffer,
     index_buffer: Buffer,
     font_atlas: Texture,
 }
 
-fn setup_vtx_arrays(shader: &Arc<Shader>) {
+fn setup_vtx_arrays(shader: &ShaderHandle) {
     let position = shader.get_attribute_location("in_position");
     let texcoord = shader.get_attribute_location("in_texcoord");
     let color = shader.get_attribute_location("in_color");
@@ -58,7 +58,7 @@ impl Renderer {
             * Matrix4x4::translation(Vector3::new(-1.0, 1.0, 0.0));
         
         self.material.apply();
-        self.material.shader.resource.set_uniform_mat4("mvp", matrix);
+        self.material.shader.inner.set_uniform_mat4("mvp", matrix);
 
         unsafe {
             gl::Enable(gl::SCISSOR_TEST);
@@ -72,12 +72,12 @@ impl Renderer {
             gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as i32);
             gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as i32);
 
-            self.material.shader.resource.set_uniform_int("mainTexture", 0);
+            self.material.shader.inner.set_uniform_int("mainTexture", 0);
 
             gl::BindBuffer(gl::ARRAY_BUFFER, self.vertex_buffer.handle());
             gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, self.index_buffer.handle());
 
-            setup_vtx_arrays(&self.material.shader.resource);
+            setup_vtx_arrays(&self.material.shader);
         }
 
         let draw_data = imgui.render();

@@ -1,4 +1,5 @@
-use std::{collections::HashMap, fs::{self, File}, io::{Error, Read}, marker::PhantomData, path::Path, sync::{Arc, RwLock, Weak}};
+use std::{collections::HashMap, fs::{self, File}, io::{Error, Read}, marker::PhantomData, ops::{Deref, DerefMut}, path::Path, sync::{Arc, RwLock, Weak}};
+use log::{info, warn, error};
 
 use basis_universal::{TranscodeParameters, Transcoder, TranscoderTextureFormat};
 use gltf::{import_buffers, Gltf};
@@ -16,12 +17,25 @@ lazy_static! {
     static ref EFFECT_CACHE: RwLock<EffectCache> = RwLock::new(EffectCache::new());
 }
 
+#[macro_export]
+macro_rules! runtime_asset {
+    ($x:expr) => {
+        LoadedAsset::new($x, format!("<runtime - {}:{}>", file!(), line!()).as_str())
+    };
+}
+
+pub type TextureHandle = Arc<LoadedAsset<Texture>>;
+pub type ShaderHandle = Arc<LoadedAsset<Shader>>;
+pub type MaterialHandle = Arc<LoadedAsset<Material>>;
+pub type ModelHandle = Arc<LoadedAsset<Model>>;
+pub type EffectHandle = Arc<LoadedAsset<EffectData>>;
+
 pub fn unload_texture(path: &str) {
     let tex_cache = &mut TEXTURE_CACHE.write().unwrap();
     tex_cache.unload(path);
 }
 
-pub fn load_texture(path: &str) -> Result<Arc<Texture>, ResourceError> {
+pub fn load_texture(path: &str) -> Result<TextureHandle, ResourceError> {
     let tex_cache = &mut TEXTURE_CACHE.write().unwrap();
     return tex_cache.load(path);
 }
@@ -31,7 +45,7 @@ pub fn unload_shader(path: &str) {
     shader_cache.unload(path);
 }
 
-pub fn load_shader(path: &str) -> Result<Arc<Shader>, ResourceError> {
+pub fn load_shader(path: &str) -> Result<ShaderHandle, ResourceError> {
     let shader_cache = &mut SHADER_CACHE.write().unwrap();
     return shader_cache.load(path);
 }
@@ -41,7 +55,7 @@ pub fn unload_material(path: &str) {
     material_cache.unload(path);
 }
 
-pub fn load_material(path: &str) -> Result<Arc<Material>, ResourceError> {
+pub fn load_material(path: &str) -> Result<MaterialHandle, ResourceError> {
     let material_cache = &mut MATERIAL_CACHE.write().unwrap();
     return material_cache.load(path);
 }
@@ -51,7 +65,7 @@ pub fn unload_model(path: &str) {
     model_cache.unload(path);
 }
 
-pub fn load_model(path: &str) -> Result<Arc<Model>, ResourceError> {
+pub fn load_model(path: &str) -> Result<ModelHandle, ResourceError> {
     let model_cache = &mut MODEL_CACHE.write().unwrap();
     return model_cache.load(path);
 }
@@ -61,9 +75,17 @@ pub fn unload_effect(path: &str) {
     effect_cache.unload(path);
 }
 
-pub fn load_effect(path: &str) -> Result<Arc<EffectData>, ResourceError> {
+pub fn load_effect(path: &str) -> Result<EffectHandle, ResourceError> {
     let effect_cache = &mut EFFECT_CACHE.write().unwrap();
     return effect_cache.load(path);
+}
+
+pub fn clear_all() {
+    TEXTURE_CACHE.write().unwrap().clear();
+    SHADER_CACHE.write().unwrap().clear();
+    MATERIAL_CACHE.write().unwrap().clear();
+    MODEL_CACHE.write().unwrap().clear();
+    EFFECT_CACHE.write().unwrap().clear();
 }
 
 #[derive(Debug)]
@@ -131,7 +153,7 @@ impl ResourceLoader<Texture> for TextureLoader {
             let (header, decoded) = match decode_to_vec(tex_data) {
                 Ok(v) => v,
                 Err(e) => {
-                    println!("Failed decoding QOI image: {:?}", e);
+                    error!("Failed decoding QOI image: {:?}", e);
                     return Err(ResourceError::ParseError);
                 },
             };
@@ -157,7 +179,7 @@ impl ResourceLoader<Texture> for TextureLoader {
             Ok(tex)
         }
         else {
-            println!("Unsupported texture format");
+            error!("Unsupported texture format");
             Err(ResourceError::ParseError)
         }
     }
@@ -252,7 +274,7 @@ impl ResourceLoader<EffectData> for EffectLoader {
         let effect_data = match ron::from_str::<EffectData>(&effect_str) {
             Ok(v) => v,
             Err(e) => {
-                println!("PARSE ERROR: {:?}", e);
+                error!("PARSE ERROR: {:?}", e);
                 return Err(ResourceError::ParseError);
             }
         };
@@ -274,12 +296,45 @@ impl ResourceLoader<Material> for MaterialLoader {
         let material_data = match ron::from_str::<Material>(&material_str) {
             Ok(v) => v,
             Err(e) => {
-                println!("PARSE ERROR: {:?}", e);
+                error!("PARSE ERROR: {:?}", e);
                 return Err(ResourceError::ParseError);
             }
         };
 
         Ok(material_data)
+    }
+}
+
+/// Wrapper around a loaded resource
+/// Provides information about what path a resource was loaded from
+pub struct LoadedAsset<TResource> {
+    pub inner: TResource,
+    pub loaded_path: String,
+}
+
+impl<TResource> LoadedAsset<TResource> {
+    pub fn new(asset: TResource, path: &str) -> LoadedAsset<TResource> {
+        LoadedAsset { inner: asset, loaded_path: path.to_string() }
+    }
+}
+
+impl<TResource> Deref for LoadedAsset<TResource> {
+    type Target = TResource;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<TResource> DerefMut for LoadedAsset<TResource> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
+impl<TResource> Drop for LoadedAsset<TResource> {
+    fn drop(&mut self) {
+        info!("Unloaded: {}", self.loaded_path);
     }
 }
 
@@ -289,7 +344,7 @@ impl ResourceLoader<Material> for MaterialLoader {
 pub struct ResourceCache<TResource, TResourceLoader>
     where TResourceLoader: ResourceLoader<TResource>
 {
-    cache: HashMap<String, Weak<TResource>>,
+    cache: HashMap<String, Weak<LoadedAsset<TResource>>>,
     phantom: PhantomData<TResourceLoader>
 }
 
@@ -303,11 +358,15 @@ impl<TResource, TResourceLoader> ResourceCache<TResource, TResourceLoader>
         }
     }
 
+    pub fn clear(self: &mut Self) {
+        self.cache.clear();
+    }
+
     pub fn unload(self: &mut Self, path: &str) {
         self.cache.remove(path);
     }
 
-    pub fn load(self: &mut Self, path: &str) -> Result<Arc<TResource>, ResourceError> {
+    pub fn load(self: &mut Self, path: &str) -> Result<Arc<LoadedAsset<TResource>>, ResourceError> {
         if self.cache.contains_key(path) {
             // try and get a reference to the resource, upgraded to a new Rc
             // if that fails, the resource has been unloaded (we'll just load a new one)
@@ -322,17 +381,17 @@ impl<TResource, TResourceLoader> ResourceCache<TResource, TResourceLoader>
             };
         }
 
-        println!("Loading {}: {}", std::any::type_name::<TResource>(), path);
+        info!("Loading: {}", path);
 
-        let tex = match TResourceLoader::load_resource(path) {
+        let res = match TResourceLoader::load_resource(path) {
             Ok(v) => v,
             Err(e) => {
-                println!("\t FAILED: {:?}", e);
+                warn!("\t FAILED: {:?}", e);
                 return Err(e);
             }
         };
 
-        let res = Arc::new(tex);
+        let res = Arc::new(LoadedAsset::new(res, path));
         let store = Arc::downgrade(&res.clone());
 
         self.cache.insert(path.to_owned(), store);

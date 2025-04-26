@@ -1,10 +1,11 @@
 use std::{collections::HashMap, fs::File};
 
 use hecs::{CommandBuffer, Entity, World};
+use log::{info, warn};
 use rand::rngs::ThreadRng;
 use sdl2::controller::{Axis, Button, GameController};
 
-use crate::{asset_loader::{load_effect, load_model}, bsp::{bspcommon::aabb_aabb_intersects, bspfile::BspFile, bsplightmap::BspLightmap, bsprenderer::{BspMapModelRenderer, BspMapRenderer, BspMapTextures}}, component::{basicanim::{AnimationLoopMode, BasicLerpAnim}, camera::{Camera, FPCamera}, charactercontroller::CharacterController, door::{Door, DoorLink, DoorOpener}, effect::Effect, fpview::FPView, light::Light, mapmodel::MapModel, meshpose::MeshPose, playerinput::PlayerInput, rendermesh::{RenderMesh, SkinnedMesh}, rotator::Rotator, transform3d::Transform3D, triggerable::{TriggerLink, TriggerState}}, math::{Quaternion, Vector3}, misc::AABB, parse_utils, system::{anim_system::{basic_animation_system, compute_pose_transforms}, character_system::{character_apply_input_update, character_init, character_input_update, character_rotation_update, character_update}, door_system::door_system_update, effect_system::effect_system, flycam_system::flycam_system_update, fpcam_system::fpcam_update, fpview_system::{fpview_eye_update, fpview_input_system_update}, render_system::{render_system, skinning_system, NUM_CUSTOM_LIGHT_LAYERS}, rotator_system::rotator_system_update, triggerable_system::trigger_link_system_update}};
+use crate::{asset_loader::{load_effect, load_model}, bsp::{bspcommon::aabb_aabb_intersects, bspfile::BspFile, bsplightmap::BspLightmap, bsprenderer::{BspMapModelRenderer, BspMapRenderer, BspMapTextures}}, component::{basicanim::{AnimationLoopMode, BasicLerpAnim}, camera::{Camera, FPCamera}, charactercontroller::CharacterController, door::{Door, DoorLink, DoorOpener}, effect::Effect, fpview::FPView, light::Light, mapmodel::MapModel, meshpose::MeshPose, playerinput::PlayerInput, rendermesh::{RenderMesh, SkinnedMesh}, rotator::Rotator, transform3d::Transform3D, triggerable::{TriggerLink, TriggerState}}, math::{Quaternion, Vector3}, misc::AABB, parse_utils, system::{anim_system::{basic_animation_system, compute_pose_transforms}, ccmd_system::ConsoleCommandSystem, character_system::{character_apply_input_update, character_init, character_input_update, character_rotation_update, character_update}, door_system::door_system_update, effect_system::effect_system, flycam_system::flycam_system_update, fpcam_system::fpcam_update, fpview_system::{fpview_eye_update, fpview_input_system_update}, render_system::{render_system, skinning_system, NUM_CUSTOM_LIGHT_LAYERS}, rotator_system::rotator_system_update, triggerable_system::trigger_link_system_update}};
 
 #[derive(Default)]
 pub struct InputState {
@@ -44,23 +45,24 @@ pub struct GameState {
     test_fx: Entity,
     map_data: Option<MapData>,
     rng: ThreadRng,
+    console_command_system: ConsoleCommandSystem,
 }
 
 impl MapData {
     pub fn load_map(map_name: &str) -> MapData {
-        println!("Loading map: {}", map_name);
+        info!("Loading map: {}", map_name);
 
         let mut bsp_file = File::open(format!("content/maps/{}.bsp", map_name).as_str()).unwrap();
         let bsp = BspFile::new(&mut bsp_file);
-        println!("BSP DATA LOADED");
+        info!("BSP DATA LOADED");
         let bsp_textures = BspMapTextures::new(&bsp);
-        println!("BSP TEXTURES LOADED");
+        info!("BSP TEXTURES LOADED");
         let bsp_lightmap = BspLightmap::new(&bsp);
-        println!("LIGHTMAP ATLAS CREATED");
+        info!("LIGHTMAP ATLAS CREATED");
         let bsp_map_model_renderer = BspMapModelRenderer::new(&bsp, &bsp_textures, &bsp_lightmap);
-        println!("MAP MODEL RENDERER CREATED");
+        info!("MAP MODEL RENDERER CREATED");
 
-        println!("Map loaded");
+        info!("Map loaded");
 
         MapData {
             map: bsp,
@@ -74,7 +76,7 @@ impl MapData {
 
     pub fn update_renderer_cache(self: &mut Self, index: usize) {
         while self.map_renderers.len() <= index {
-            println!("Allocating map renderer for camera {}", index);
+            info!("Allocating map renderer for camera {}", index);
             self.map_renderers.push(BspMapRenderer::new(&self.map));
         }
     }
@@ -103,7 +105,7 @@ impl GameState {
                 }
                 "worldspawn" => {
                     for (key, val) in entity_data {
-                        println!("worldspawn: {} = {}", key, val);
+                        info!("worldspawn: {} = {}", key, val);
                     }
                 }
                 "prop_dynamic" => {
@@ -285,7 +287,7 @@ impl GameState {
         let mut cmd_buf = CommandBuffer::new();
         for (e, targetname) in pending_resolve_targets {
             if !targetmap.contains_key(&targetname) {
-                println!("Couldn't find trigger target: {}", &targetname);
+                warn!("Couldn't find trigger target: {}", &targetname);
             }
             else {
                 let target_ent = targetmap[&targetname];
@@ -358,6 +360,7 @@ impl GameState {
             test_model,
             test_fx,
             rng: rand::rng(),
+            console_command_system: ConsoleCommandSystem::new(),
         }
     }
 
@@ -424,5 +427,9 @@ impl GameState {
         if let Some(map_data) = &mut self.map_data {
             render_system(&self.time_data, &window_data, map_data, &mut self.world);
         }
+    }
+
+    pub fn exec_commands<I>(self: &mut Self, commands: I) where I : Iterator::<Item = String> {
+        self.console_command_system.exec_commands(commands, &mut self.world);
     }
 }

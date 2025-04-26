@@ -1,10 +1,8 @@
-use std::sync::Arc;
-
 use hecs::World;
 use lazy_static::lazy_static;
 use rayon::prelude::*;
 
-use crate::{bsp::{bspcommon::{aabb_frustum, coord_space_transform, extract_frustum, transform_aabb}, bspfile::{BspFile, LSHProbeSample}, bsprenderer::BspMapRenderer}, component::{camera::Camera, effect::Effect, mapmodel::MapModel, meshpose::MeshPose, rendermesh::{RenderMesh, SkinnedMesh}, transform3d::Transform3D}, gamestate::{MapData, TimeData, WindowData}, graphics::model::{MeshVertex, Model, ModelSkin}, math::{Matrix4x4, Vector4}, misc::AABB};
+use crate::{asset_loader::ModelHandle, bsp::{bspcommon::{aabb_frustum, coord_space_transform, extract_frustum, transform_aabb}, bspfile::{BspFile, LSHProbeSample}, bsprenderer::BspMapRenderer}, component::{camera::Camera, effect::Effect, mapmodel::MapModel, meshpose::MeshPose, rendermesh::{RenderMesh, SkinnedMesh}, transform3d::Transform3D}, gamestate::{MapData, TimeData, WindowData}, graphics::model::{MeshVertex, Model, ModelSkin}, math::{Matrix4x4, Vector4}, misc::AABB};
 
 pub const NUM_CUSTOM_LIGHT_LAYERS: usize = 30;
 pub const CUSTOM_LIGHT_LAYER_START: usize = 32;
@@ -53,8 +51,8 @@ fn make_light_table(data: &[u8]) -> Vec<f32> {
 
 fn sort_mesh_iter(renderer: &BspMapRenderer, bsp: &BspFile, frustum: &[Vector4], mesh: &RenderMesh, entity_idx: usize,
     cur_node: &mut usize, parent_transform: Matrix4x4, viewproj: &Matrix4x4, sh: &LSHProbeSample,
-    out_opaque_meshes: &mut Vec<(Matrix4x4, Matrix4x4, Vector4, Vector4, Vector4, Arc<Model>, usize, usize, usize, isize, f32)>,
-    out_transparent_meshes: &mut Vec<(Matrix4x4, Matrix4x4, Vector4, Vector4, Vector4, Arc<Model>, usize, usize, usize, isize, f32)>
+    out_opaque_meshes: &mut Vec<(Matrix4x4, Matrix4x4, Vector4, Vector4, Vector4, ModelHandle, usize, usize, usize, isize, f32)>,
+    out_transparent_meshes: &mut Vec<(Matrix4x4, Matrix4x4, Vector4, Vector4, Vector4, ModelHandle, usize, usize, usize, isize, f32)>
 ) {
     let node = &mesh.mesh.nodes[*cur_node];
     let node_xform = node.transform * parent_transform;
@@ -207,7 +205,7 @@ fn update_skinned_mesh_iter(mesh: &RenderMesh, pose: &MeshPose, sk: &mut Skinned
     }
 }
 
-fn draw_mesh_part(mesh: &Arc<Model>, mesh_index: usize, part_index: usize, sk: Option<&SkinnedMesh>, sh_r: Vector4, sh_g: Vector4, sh_b: Vector4, local_to_world: Matrix4x4, mvp: Matrix4x4, skin_index: isize) {
+fn draw_mesh_part(mesh: &Model, mesh_index: usize, part_index: usize, sk: Option<&SkinnedMesh>, sh_r: Vector4, sh_g: Vector4, sh_b: Vector4, local_to_world: Matrix4x4, mvp: Matrix4x4, skin_index: isize) {
     let part = &mesh.meshes[mesh_index].parts[part_index];
 
     if let Some((vtx_buffer, idx_buffer)) = &part.buffers {
@@ -227,11 +225,11 @@ fn draw_mesh_part(mesh: &Arc<Model>, mesh_index: usize, part_index: usize, sk: O
 
         mat.apply();
 
-        mat.shader.resource.set_uniform_vec4("shR", sh_r);
-        mat.shader.resource.set_uniform_vec4("shG", sh_g);
-        mat.shader.resource.set_uniform_vec4("shB", sh_b);
-        mat.shader.resource.set_uniform_mat4("localToWorld", local_to_world);
-        mat.shader.resource.set_uniform_mat4("mvp", mvp);
+        mat.shader.inner.set_uniform_vec4("shR", sh_r);
+        mat.shader.inner.set_uniform_vec4("shG", sh_g);
+        mat.shader.inner.set_uniform_vec4("shB", sh_b);
+        mat.shader.inner.set_uniform_mat4("localToWorld", local_to_world);
+        mat.shader.inner.set_uniform_mat4("mvp", mvp);
 
         unsafe {
             gl::FrontFace(part.winding);
@@ -239,7 +237,7 @@ fn draw_mesh_part(mesh: &Arc<Model>, mesh_index: usize, part_index: usize, sk: O
             gl::BindBuffer(gl::ARRAY_BUFFER, vtx_buffer.handle());
             gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, idx_buffer.handle());
 
-            MeshVertex::setup_vtx_arrays(&mat.shader.resource);
+            MeshVertex::setup_vtx_arrays(&mat.shader.inner);
 
             // draw geometry
             gl::DrawElements(part.topology, part.indices.len() as i32, gl::UNSIGNED_SHORT, 0 as *const _);

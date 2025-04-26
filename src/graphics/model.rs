@@ -1,10 +1,10 @@
-use std::{collections::HashMap, mem::offset_of, sync::Arc};
+use std::{collections::HashMap, mem::offset_of};
 
 use gltf::{buffer::Data, Animation, Document, Mesh, Node, Primitive};
 
-use crate::{asset_loader::load_material, math::{Matrix4x4, Quaternion, Vector2, Vector3, Vector4}, misc::{Color32, AABB}};
+use crate::{asset_loader::{load_material, MaterialHandle}, math::{Matrix4x4, Quaternion, Vector2, Vector3, Vector4}, misc::{Color32, AABB}};
 
-use super::{anim::{QuaternionCurve, Vector3Curve}, buffer::Buffer, material::Material, shader::Shader};
+use super::{anim::{QuaternionCurve, Vector3Curve}, buffer::Buffer, shader::Shader};
 
 #[derive(Default, Clone, Copy)]
 pub struct MeshVertex {
@@ -318,7 +318,7 @@ pub struct ModelSkin {
 pub struct Model {
     pub root_transform: Matrix4x4,
     pub meshes: Vec<MeshGroup>,
-    pub materials: Vec<Arc<Material>>,
+    pub materials: Vec<MaterialHandle>,
     pub nodes: Vec<ModelNode>,
     pub animations: Vec<ModelAnimationClip>,
     pub skins: Vec<ModelSkin>
@@ -367,7 +367,7 @@ impl Model {
         }).collect();
 
         // load materials
-        let materials: Vec<Arc<Material>> = gltf.materials().map(|x| {
+        let materials: Vec<MaterialHandle> = gltf.materials().map(|x| {
             let mat_path = format!("{}/{}.mat.ron", material_path, x.name().unwrap());
             load_material(mat_path.as_str()).unwrap()
         }).collect();

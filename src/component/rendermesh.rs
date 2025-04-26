@@ -1,9 +1,7 @@
-use std::sync::Arc;
-
-use crate::graphics::{buffer::Buffer, model::{MeshVertex, Model}};
+use crate::{asset_loader::ModelHandle, graphics::{buffer::Buffer, model::MeshVertex}};
 
 pub struct RenderMesh {
-    pub mesh: Arc<Model>
+    pub mesh: ModelHandle
 }
 
 pub struct SkinnedMesh {
@@ -14,13 +12,13 @@ pub struct SkinnedMesh {
 }
 
 impl RenderMesh {
-    pub fn new(mesh: Arc<Model>) -> RenderMesh {
+    pub fn new(mesh: ModelHandle) -> RenderMesh {
         RenderMesh { mesh }
     }
 }
 
 impl SkinnedMesh {
-    pub fn new(mesh: &Arc<Model>) -> SkinnedMesh {
+    pub fn new(mesh: &ModelHandle) -> SkinnedMesh {
         SkinnedMesh {
             vtx_array: Vec::new(),
             vtx_buffer: mesh.meshes.iter().map(|x| {

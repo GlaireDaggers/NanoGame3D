@@ -1,6 +1,6 @@
 use std::{collections::HashSet, mem::offset_of, sync::Arc};
 
-use crate::{asset_loader::{load_material, load_shader}, gl_checked, graphics::{buffer::Buffer, material::{Material, MaterialParam, TextureSampler}, shader::Shader, texture::{Texture, TextureFormat}}, math::{Matrix4x4, Vector2, Vector3, Vector4}, misc::{Color32, AABB}, serialization::SerializedResource};
+use crate::{asset_loader::{load_material, load_shader, LoadedAsset, MaterialHandle}, gl_checked, graphics::{buffer::Buffer, material::{Material, MaterialParam, TextureSampler}, shader::Shader, texture::{Texture, TextureFormat}}, math::{Matrix4x4, Vector2, Vector3, Vector4}, misc::{Color32, AABB}, runtime_asset, serialization::SerializedResource};
 use super::{bspcommon::{aabb_aabb_intersects, aabb_frustum}, bspfile::{BspFile, Edge, StaticPropVertex, SURF_NODRAW, SURF_SKY, SURF_TRANS33, SURF_TRANS66}, bsplightmap::BspLightmap};
 
 // If you peruse this file, you might notice that in a lot of cases we actually update vertex data on the CPU and dynamically update the vertex buffers each frame
@@ -112,7 +112,7 @@ fn unpack_face(bsp: &BspFile, textures: &BspMapTextures, light_styles: &[f32], f
 
         let mat = &textures.loaded_materials[tex_idx];
         let texture = match &mat.params["mainTexture"] {
-            crate::graphics::material::MaterialParam::Texture(v) => &v.texture.resource,
+            crate::graphics::material::MaterialParam::Texture(v) => &v.texture.inner,
             _ => {
                 panic!("No texture assigned")
             }
@@ -177,8 +177,8 @@ fn draw_geom_setup(material: &Material, model: Matrix4x4, viewproj: Matrix4x4) {
 
     material.apply();
 
-    material.shader.resource.set_uniform_mat4("mvp", model * viewproj);
-    material.shader.resource.set_uniform_int("lmTexture", 1);
+    material.shader.inner.set_uniform_mat4("mvp", model * viewproj);
+    material.shader.inner.set_uniform_int("lmTexture", 1);
 }
 
 #[derive(Clone, Copy)]
@@ -193,8 +193,8 @@ pub struct MapVertex {
 }
 
 pub struct BspMapTextures {
-    loaded_materials: Vec<Arc<Material>>,
-    sprop_materials: Vec<Arc<Material>>,
+    loaded_materials: Vec<MaterialHandle>,
+    sprop_materials: Vec<MaterialHandle>,
     opaque_meshes: Vec<usize>,
     transp_meshes: Vec<usize>,
 }
@@ -202,8 +202,8 @@ pub struct BspMapTextures {
 impl BspMapTextures {
     pub fn new(bsp_file: &BspFile) -> BspMapTextures {
         // load unique textures
-        let mut loaded_materials: Vec<Arc<Material>> = Vec::new();
-        let mut sprop_materials: Vec<Arc<Material>> = Vec::new();
+        let mut loaded_materials: Vec<MaterialHandle> = Vec::new();
+        let mut sprop_materials: Vec<MaterialHandle> = Vec::new();
 
         let mut opaque_meshes: Vec<usize> = Vec::new();
         let mut transp_meshes: Vec<usize> = Vec::new();
@@ -218,10 +218,10 @@ impl BspMapTextures {
         ]);
 
         err_mat.params.insert("mainTexture".to_string(), MaterialParam::Texture(
-            TextureSampler { texture: SerializedResource { resource: Arc::new(err_tex) }, filter: false, wrap_s: true, wrap_t: true }
+            TextureSampler { texture: SerializedResource { inner: Arc::new(runtime_asset!(err_tex)) }, filter: false, wrap_s: true, wrap_t: true }
         ));
 
-        let err_mat = Arc::new(err_mat);
+        let err_mat = Arc::new(runtime_asset!(err_mat));
 
         for (i, tex_info) in bsp_file.tex_info_lump.textures.iter().enumerate() {
             let material = match load_material(format!("content/materials/{}.mat.ron", &tex_info.texture_name).as_str()) {
@@ -363,13 +363,13 @@ impl BspMapModelRenderer {
                 draw_geom_setup(material, model_transform, camera_viewproj);
                 bind_lightmap(lm);
 
-                let shader_position = material.shader.resource.get_attribute_location("in_pos");
-                let shader_uv = material.shader.resource.get_attribute_location("in_uv");
-                let shader_lm0 = material.shader.resource.get_attribute_location("in_lm0");
-                let shader_lm1 = material.shader.resource.get_attribute_location("in_lm1");
-                let shader_lm2 = material.shader.resource.get_attribute_location("in_lm2");
-                let shader_lm3 = material.shader.resource.get_attribute_location("in_lm3");
-                let shader_color = material.shader.resource.get_attribute_location("in_col");
+                let shader_position = material.shader.inner.get_attribute_location("in_pos");
+                let shader_uv = material.shader.inner.get_attribute_location("in_uv");
+                let shader_lm0 = material.shader.inner.get_attribute_location("in_lm0");
+                let shader_lm1 = material.shader.inner.get_attribute_location("in_lm1");
+                let shader_lm2 = material.shader.inner.get_attribute_location("in_lm2");
+                let shader_lm3 = material.shader.inner.get_attribute_location("in_lm3");
+                let shader_color = material.shader.inner.get_attribute_location("in_col");
 
                 unsafe {
                     gl_checked!{ gl::BindBuffer(gl::ARRAY_BUFFER, part.vtx_buffer.handle()) }
@@ -713,15 +713,15 @@ impl BspMapRenderer {
                 draw_geom_setup(&material, Matrix4x4::identity(), camera_viewproj);
                 bind_lightmap(lm);
 
-                let shader_position = material.shader.resource.get_attribute_location("in_pos");
-                let shader_uv = material.shader.resource.get_attribute_location("in_uv");
-                let shader_lm0 = material.shader.resource.get_attribute_location("in_lm0");
-                let shader_lm1 = material.shader.resource.get_attribute_location("in_lm1");
-                let shader_lm2 = material.shader.resource.get_attribute_location("in_lm2");
-                let shader_lm3 = material.shader.resource.get_attribute_location("in_lm3");
-                let shader_color = material.shader.resource.get_attribute_location("in_col");
+                let shader_position = material.shader.inner.get_attribute_location("in_pos");
+                let shader_uv = material.shader.inner.get_attribute_location("in_uv");
+                let shader_lm0 = material.shader.inner.get_attribute_location("in_lm0");
+                let shader_lm1 = material.shader.inner.get_attribute_location("in_lm1");
+                let shader_lm2 = material.shader.inner.get_attribute_location("in_lm2");
+                let shader_lm3 = material.shader.inner.get_attribute_location("in_lm3");
+                let shader_color = material.shader.inner.get_attribute_location("in_col");
 
-                material.shader.resource.set_uniform_float("time", animation_time);
+                material.shader.inner.set_uniform_float("time", animation_time);
 
                 unsafe {
                     gl_checked!{ gl::BindBuffer(gl::ARRAY_BUFFER, vtx_buf.handle()) }
@@ -739,7 +739,7 @@ impl BspMapRenderer {
             let mat = &textures.sprop_materials[prop.mat_idx];
             if prop.frame_idx == self.cur_frame && mat.transparent == false {
                 draw_geom_setup(&mat, Matrix4x4::identity(), camera_viewproj);
-                mat.shader.resource.set_uniform_float("time", animation_time);
+                mat.shader.inner.set_uniform_float("time", animation_time);
 
                 unsafe {
                     gl::FrontFace(gl::CCW);
@@ -747,7 +747,7 @@ impl BspMapRenderer {
                     gl_checked!{ gl::BindBuffer(gl::ARRAY_BUFFER, prop.vtx_buffer.handle()) }
                     gl_checked!{ gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, prop.idx_buffer.handle()) }
 
-                    StaticPropVertex::setup_vtx_arrays(&mat.shader.resource);
+                    StaticPropVertex::setup_vtx_arrays(&mat.shader.inner);
 
                     // draw geometry
                     gl_checked!{ gl::DrawElements(prop.topology, prop.num_indices as i32, gl::UNSIGNED_SHORT, 0 as *const _) }
@@ -766,15 +766,15 @@ impl BspMapRenderer {
                 draw_geom_setup(&material, Matrix4x4::identity(), camera_viewproj);
                 bind_lightmap(lm);
 
-                let shader_position = material.shader.resource.get_attribute_location("in_pos");
-                let shader_uv = material.shader.resource.get_attribute_location("in_uv");
-                let shader_lm0 = material.shader.resource.get_attribute_location("in_lm0");
-                let shader_lm1 = material.shader.resource.get_attribute_location("in_lm1");
-                let shader_lm2 = material.shader.resource.get_attribute_location("in_lm2");
-                let shader_lm3 = material.shader.resource.get_attribute_location("in_lm3");
-                let shader_color = material.shader.resource.get_attribute_location("in_col");
+                let shader_position = material.shader.inner.get_attribute_location("in_pos");
+                let shader_uv = material.shader.inner.get_attribute_location("in_uv");
+                let shader_lm0 = material.shader.inner.get_attribute_location("in_lm0");
+                let shader_lm1 = material.shader.inner.get_attribute_location("in_lm1");
+                let shader_lm2 = material.shader.inner.get_attribute_location("in_lm2");
+                let shader_lm3 = material.shader.inner.get_attribute_location("in_lm3");
+                let shader_color = material.shader.inner.get_attribute_location("in_col");
 
-                material.shader.resource.set_uniform_float("time", animation_time);
+                material.shader.inner.set_uniform_float("time", animation_time);
 
                 unsafe {
                     gl_checked!{ gl::BindBuffer(gl::ARRAY_BUFFER, vtx_buf.handle()) }
@@ -792,7 +792,7 @@ impl BspMapRenderer {
             let mat = &textures.sprop_materials[prop.mat_idx];
             if prop.frame_idx == self.cur_frame && mat.transparent {
                 draw_geom_setup(&mat, Matrix4x4::identity(), camera_viewproj);
-                mat.shader.resource.set_uniform_float("time", animation_time);
+                mat.shader.inner.set_uniform_float("time", animation_time);
 
                 unsafe {
                     gl::FrontFace(gl::CCW);
@@ -800,7 +800,7 @@ impl BspMapRenderer {
                     gl_checked!{ gl::BindBuffer(gl::ARRAY_BUFFER, prop.vtx_buffer.handle()) }
                     gl_checked!{ gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, prop.idx_buffer.handle()) }
 
-                    StaticPropVertex::setup_vtx_arrays(&mat.shader.resource);
+                    StaticPropVertex::setup_vtx_arrays(&mat.shader.inner);
 
                     // draw geometry
                     gl_checked!{ gl::DrawElements(prop.topology, prop.num_indices as i32, gl::UNSIGNED_SHORT, 0 as *const _) }

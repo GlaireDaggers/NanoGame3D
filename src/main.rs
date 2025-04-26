@@ -1,6 +1,8 @@
 use core::f32;
 use std::ffi::CStr;
+use log::info;
 
+use consolewin::{ConsoleWindow, ConsoleWindowLogger};
 use frametimer::FrameTimer;
 use gamestate::{GameState, WindowData};
 use imgui::ConfigFlags;
@@ -31,8 +33,15 @@ pub mod effect;
 pub mod gamestate;
 pub mod imgui_render;
 pub mod frametimer;
+pub mod consolewin;
+
+static LOGGER: ConsoleWindowLogger = ConsoleWindowLogger {
+};
 
 fn main() {
+    log::set_logger(&LOGGER).unwrap();
+    log::set_max_level(log::LevelFilter::Info);
+
     let sdl = sdl2::init().unwrap();
     let sdl_video = sdl.video().unwrap();
     let sdl_timer = sdl.timer().unwrap();
@@ -64,7 +73,7 @@ fn main() {
 
     let gl_ver = unsafe { CStr::from_ptr(gl::GetString(gl::VERSION) as *const _) }.to_str().unwrap();
     let gl_renderer = unsafe { CStr::from_ptr(gl::GetString(gl::RENDERER) as *const _) }.to_str().unwrap();
-    println!("{} (GL: {})", gl_renderer, gl_ver);
+    info!("{} (GL: {})", gl_renderer, gl_ver);
 
     unsafe {
         gl::DepthRangef(0.0, 1.0);
@@ -101,6 +110,9 @@ fn main() {
     let mut frame_timer = FrameTimer::new();
 
     let mut show_fps_stats = false;
+    let mut show_console = false;
+
+    let mut console_window = ConsoleWindow::new(&imgui);
 
     let mut event_pump = sdl.event_pump().unwrap();
     'main: loop {
@@ -116,7 +128,7 @@ fn main() {
                     match gamepad {
                         None => {
                             let new_gamepad = sdl_gamecontroller.open(which).unwrap();
-                            println!("Opened gamepad: {}", new_gamepad.name());
+                            info!("Opened gamepad: {}", new_gamepad.name());
                             gamepad = Some(new_gamepad);
                         }
                         _ => {
@@ -128,6 +140,9 @@ fn main() {
                         match k {
                             Keycode::F11 => {
                                 show_fps_stats = !show_fps_stats;
+                            }
+                            Keycode::Backquote => {
+                                show_console = !show_console;
                             }
                             _ => {}
                         }
@@ -157,6 +172,9 @@ fn main() {
             delta_accum -= TICK_INTERVAL;
             game_state.tick(TICK_INTERVAL, gamepad.as_ref());
         }
+
+        // execute commands
+        game_state.exec_commands(console_window.drain_commands());
 
         // render
         let win_size = window.size();
@@ -216,8 +234,14 @@ fn main() {
             }
         }
 
+        if show_console {
+            console_window.draw((win_size.0 as f32, win_size.1 as f32), ui);
+        }
+
         imgui_renderer.render(&mut imgui);
 
         window.gl_swap_window();
     }
+
+    info!("=== SHUTTING DOWN ===");
 }

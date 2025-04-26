@@ -1,11 +1,11 @@
-use std::{mem::offset_of, ops::Range, sync::Arc};
+use std::{mem::offset_of, ops::Range};
 
 use noise::{NoiseFn, Simplex};
 use rand::{distr::uniform::SampleUniform, rngs::ThreadRng, Rng};
 
-use crate::{bsp::bspcommon::coord_space_transform, graphics::{buffer::Buffer, shader::Shader}, math::{Matrix4x4, Quaternion, Vector2, Vector3, Vector4}, misc::Color32};
+use crate::{asset_loader::EffectHandle, bsp::bspcommon::coord_space_transform, graphics::{buffer::Buffer, shader::Shader}, math::{Matrix4x4, Quaternion, Vector2, Vector3, Vector4}, misc::Color32};
 
-use super::effect_data::{EffectData, EffectDisplay, EffectEmitter, SpriteBillboardType, SubEmitterSpawn};
+use super::effect_data::{EffectDisplay, EffectEmitter, SpriteBillboardType, SubEmitterSpawn};
 
 #[derive(Clone, Copy)]
 pub struct ParticleVertex {
@@ -50,7 +50,7 @@ struct EffectEmitterInstance {
 
 pub struct EffectInstance {
     pub transform: Matrix4x4,
-    pub effect_data: Arc<EffectData>,
+    pub effect_data: EffectHandle,
     pub enable_emit: bool,
     emitters: Vec<EffectEmitterInstance>
 }
@@ -500,9 +500,9 @@ impl EffectEmitterInstance {
                 vertex_buffer.resize(vertex_buffer.size());
                 vertex_buffer.set_data(0, &vertices);
 
-                mat.resource.apply();
+                mat.inner.apply();
 
-                mat.resource.shader.resource.set_uniform_mat4("mvp",
+                mat.inner.shader.inner.set_uniform_mat4("mvp",
                     modelview *
                     coord_space_transform() *
                     projection
@@ -514,7 +514,7 @@ impl EffectEmitterInstance {
                     gl::BindBuffer(gl::ARRAY_BUFFER, vertex_buffer.handle());
                     gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, index_buffer.handle());
 
-                    ParticleVertex::setup_vtx_arrays(&mat.resource.shader.resource);
+                    ParticleVertex::setup_vtx_arrays(&mat.inner.shader.inner);
 
                     // draw geometry
                     gl::DrawElements(gl::TRIANGLES, (self.particles.len() * 6) as i32, gl::UNSIGNED_SHORT, 0 as *const _);
@@ -560,7 +560,7 @@ impl EffectEmitterInstance {
 }
 
 impl EffectInstance {
-    pub fn new(data: &Arc<EffectData>, enable_emit: bool) -> EffectInstance {
+    pub fn new(data: &EffectHandle, enable_emit: bool) -> EffectInstance {
         let emitters = data.emitters.iter().enumerate().map(|(idx, em_data)| {
             EffectEmitterInstance::new(idx, em_data)
         }).collect::<Vec<_>>();
