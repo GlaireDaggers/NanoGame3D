@@ -27,6 +27,12 @@ pub struct Texture {
     is_compressed: bool,
 }
 
+impl PartialEq for Texture {
+    fn eq(&self, other: &Self) -> bool {
+        self.handle == other.handle
+    }
+}
+
 impl Texture {
     pub fn new(fmt: TextureFormat, w: i32, h: i32, levels: i32) -> Texture {
         let mut handle = 0;

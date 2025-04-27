@@ -70,6 +70,17 @@ impl Vector2 {
     pub fn lerp(v1: Self, v2: Self, t: f32) -> Self {
         (v1 * (1.0 - t)) + (v2 * t)
     }
+
+    /// Rotate a 2D position by the given angle around origin
+    pub fn rotate(self: &Vector2, angle: f32) -> Self {
+        let ca = angle.cos();
+        let sa = angle.sin();
+
+        let x = (ca * self.x) - (sa * self.y);
+        let y = (sa * self.x) + (ca * self.y);
+
+        Vector2::new(x, y)
+    }
 }
 
 impl ops::Add<Vector2> for Vector2 {

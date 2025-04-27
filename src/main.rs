@@ -1,6 +1,8 @@
 use core::f32;
 use std::ffi::CStr;
+use asset_loader::{load_font, load_texture};
 use cvar::{define_cvar, get_cvar};
+use fontdue::layout::{HorizontalAlign, LayoutSettings, VerticalAlign, WrapStyle};
 use log::info;
 
 use consolewin::{ConsoleWindow, ConsoleWindowLogger};
@@ -9,7 +11,10 @@ use gamestate::{GameState, WindowData};
 use imgui::ConfigFlags;
 use imgui_render::Renderer;
 use imgui_sdl2_support::SdlPlatform;
+use math::Vector2;
+use misc::Color32;
 use sdl2::keyboard::Keycode;
+use ui::{font::FontPainter, painter::UiPainter};
 
 const TICK_INTERVAL: f32 = 1.0 / 60.0;
 const MAX_TICK_ACCUM: f32 = TICK_INTERVAL * 4.0;
@@ -36,6 +41,7 @@ pub mod imgui_render;
 pub mod frametimer;
 pub mod consolewin;
 pub mod cvar;
+pub mod ui;
 
 static LOGGER: ConsoleWindowLogger = ConsoleWindowLogger {
 };
@@ -101,6 +107,12 @@ fn main() {
 
     // fix crash on Pi Zero
     imgui.io_mut().config_flags.insert(ConfigFlags::NO_MOUSE_CURSOR_CHANGE);
+
+    // create UI painter
+    let mut painter = UiPainter::new(1024);
+    let test_texture = load_texture("content/textures/effects/glow.basis").unwrap();
+    let test_font = load_font("content/fonts/Roboto-Regular.ttf").unwrap();
+    let mut test_font_painter = FontPainter::new(&test_font);
 
     // create game state
     let mut game_state = GameState::new();
@@ -179,6 +191,34 @@ fn main() {
         // render
         let win_size = window.size();
         game_state.render(WindowData { width: win_size.0 as i32, height: win_size.1 as i32 });
+
+        // draw UI
+        let mut ui_pass = painter.begin_pass(win_size);
+        ui_pass.draw_sprite(&test_texture,
+            Vector2::new(64.0, 64.0), 
+            None, 
+            Vector2::new(0.5, 0.5), 
+            45.0_f32.to_radians(),
+            None,
+            Color32::new(255, 255, 255, 255)
+        );
+        test_font_painter.draw_string(&mut ui_pass,
+            "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Mauris pretium tristique placerat. Phasellus et quam molestie, interdum augue at, interdum odio. Maecenas et nulla eu est ultrices auctor. Aliquam elementum, nulla sed consectetur convallis, massa elit laoreet felis, eu mattis lacus eros at est. Duis orci nisl, porttitor sed turpis vitae, pharetra commodo orci. Suspendisse non sapien odio. Aenean quis erat nulla. Suspendisse suscipit ac est in pellentesque. Maecenas ut ipsum risus. Morbi leo eros, porttitor non molestie eu, sollicitudin vel libero.",
+            18.0,
+            Color32::new(255, 32, 32, 255),
+            LayoutSettings {
+                x: 16.0,
+                y: 16.0,
+                max_width: Some(320.0),
+                max_height: None,
+                horizontal_align: HorizontalAlign::Left,
+                vertical_align: VerticalAlign::Top,
+                line_height: 1.0,
+                wrap_style: WrapStyle::Word,
+                wrap_hard_breaks: true
+            }
+        );
+        ui_pass.end();
 
         let frame_end = sdl_timer.performance_counter();
 

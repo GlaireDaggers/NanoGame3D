@@ -1,6 +1,7 @@
 use std::{collections::HashMap, fs::{self, File}, io::{Error, Read}, marker::PhantomData, ops::{Deref, DerefMut}, path::Path, sync::{Arc, RwLock, Weak}};
 use log::{info, warn, error};
 
+use fontdue::Font;
 use basis_universal::{TranscodeParameters, Transcoder, TranscoderTextureFormat};
 use gltf::{import_buffers, Gltf};
 use lazy_static::lazy_static;
@@ -15,6 +16,7 @@ lazy_static! {
     static ref MATERIAL_CACHE: RwLock<MaterialCache> = RwLock::new(MaterialCache::new());
     static ref MODEL_CACHE: RwLock<ModelCache> = RwLock::new(ModelCache::new());
     static ref EFFECT_CACHE: RwLock<EffectCache> = RwLock::new(EffectCache::new());
+    static ref FONT_CACHE: RwLock<FontCache> = RwLock::new(FontCache::new());
 }
 
 #[macro_export]
@@ -29,10 +31,11 @@ pub type ShaderHandle = Arc<LoadedAsset<Shader>>;
 pub type MaterialHandle = Arc<LoadedAsset<Material>>;
 pub type ModelHandle = Arc<LoadedAsset<Model>>;
 pub type EffectHandle = Arc<LoadedAsset<EffectData>>;
+pub type FontHandle = Arc<LoadedAsset<Font>>;
 
-pub fn unload_texture(path: &str) {
+pub fn unload_texture(asset: &TextureHandle) {
     let tex_cache = &mut TEXTURE_CACHE.write().unwrap();
-    tex_cache.unload(path);
+    tex_cache.unload(&asset.loaded_path);
 }
 
 pub fn load_texture(path: &str) -> Result<TextureHandle, ResourceError> {
@@ -40,9 +43,9 @@ pub fn load_texture(path: &str) -> Result<TextureHandle, ResourceError> {
     return tex_cache.load(path);
 }
 
-pub fn unload_shader(path: &str) {
+pub fn unload_shader(asset: &ShaderHandle) {
     let shader_cache = &mut SHADER_CACHE.write().unwrap();
-    shader_cache.unload(path);
+    shader_cache.unload(&asset.loaded_path);
 }
 
 pub fn load_shader(path: &str) -> Result<ShaderHandle, ResourceError> {
@@ -50,9 +53,9 @@ pub fn load_shader(path: &str) -> Result<ShaderHandle, ResourceError> {
     return shader_cache.load(path);
 }
 
-pub fn unload_material(path: &str) {
+pub fn unload_material(asset: &MaterialHandle) {
     let material_cache = &mut MATERIAL_CACHE.write().unwrap();
-    material_cache.unload(path);
+    material_cache.unload(&asset.loaded_path);
 }
 
 pub fn load_material(path: &str) -> Result<MaterialHandle, ResourceError> {
@@ -60,9 +63,9 @@ pub fn load_material(path: &str) -> Result<MaterialHandle, ResourceError> {
     return material_cache.load(path);
 }
 
-pub fn unload_model(path: &str) {
+pub fn unload_model(asset: &ModelHandle) {
     let model_cache = &mut MODEL_CACHE.write().unwrap();
-    model_cache.unload(path);
+    model_cache.unload(&asset.loaded_path);
 }
 
 pub fn load_model(path: &str) -> Result<ModelHandle, ResourceError> {
@@ -70,14 +73,24 @@ pub fn load_model(path: &str) -> Result<ModelHandle, ResourceError> {
     return model_cache.load(path);
 }
 
-pub fn unload_effect(path: &str) {
+pub fn unload_effect(asset: &EffectHandle) {
     let effect_cache = &mut EFFECT_CACHE.write().unwrap();
-    effect_cache.unload(path);
+    effect_cache.unload(&asset.loaded_path);
 }
 
 pub fn load_effect(path: &str) -> Result<EffectHandle, ResourceError> {
     let effect_cache = &mut EFFECT_CACHE.write().unwrap();
     return effect_cache.load(path);
+}
+
+pub fn unload_font(asset: &FontHandle) {
+    let font_cache = &mut FONT_CACHE.write().unwrap();
+    font_cache.unload(&asset.loaded_path);
+}
+
+pub fn load_font(path: &str) -> Result<FontHandle, ResourceError> {
+    let font_cache = &mut FONT_CACHE.write().unwrap();
+    return font_cache.load(path);
 }
 
 pub fn clear_all() {
@@ -86,6 +99,7 @@ pub fn clear_all() {
     MATERIAL_CACHE.write().unwrap().clear();
     MODEL_CACHE.write().unwrap().clear();
     EFFECT_CACHE.write().unwrap().clear();
+    FONT_CACHE.write().unwrap().clear();
 }
 
 #[derive(Debug)]
@@ -102,7 +116,7 @@ pub struct TextureLoader {
 }
 
 impl ResourceLoader<Texture> for TextureLoader {
-    fn load_resource(path: &str) -> Result<Texture, ResourceError> {    
+    fn load_resource(path: &str) -> Result<Texture, ResourceError> {
         let mut tex_file = match File::open(path) {
             Ok(v) => v,
             Err(e) => return Err(ResourceError::IOError(e))
@@ -305,6 +319,30 @@ impl ResourceLoader<Material> for MaterialLoader {
     }
 }
 
+pub struct FontLoader {
+}
+
+impl ResourceLoader<Font> for FontLoader {
+    fn load_resource(path: &str) -> Result<Font, ResourceError> {
+        let mut font_file = match File::open(path) {
+            Ok(v) => v,
+            Err(e) => return Err(ResourceError::IOError(e))
+        };
+
+        let mut font_data = Vec::new();
+        font_file.read_to_end(&mut font_data).unwrap();
+
+        let font = match fontdue::Font::from_bytes(font_data, fontdue::FontSettings::default()) {
+            Ok(f) => f,
+            Err(_) => {
+                return Err(ResourceError::ParseError);
+            },
+        };
+
+        Ok(font)
+    }
+}
+
 /// Wrapper around a loaded resource
 /// Provides information about what path a resource was loaded from
 pub struct LoadedAsset<TResource> {
@@ -404,3 +442,4 @@ pub type ShaderCache = ResourceCache<Shader, ShaderLoader>;
 pub type MaterialCache = ResourceCache<Material, MaterialLoader>;
 pub type ModelCache = ResourceCache<Model, ModelLoader>;
 pub type EffectCache = ResourceCache<EffectData, EffectLoader>;
+pub type FontCache = ResourceCache<Font, FontLoader>;
