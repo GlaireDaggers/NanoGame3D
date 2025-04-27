@@ -1,8 +1,6 @@
 use core::f32;
 use std::ffi::CStr;
-use asset_loader::{load_font, load_texture};
 use cvar::{define_cvar, get_cvar};
-use fontdue::layout::{HorizontalAlign, LayoutSettings, VerticalAlign, WrapStyle};
 use log::info;
 
 use consolewin::{ConsoleWindow, ConsoleWindowLogger};
@@ -11,10 +9,8 @@ use gamestate::{GameState, WindowData};
 use imgui::ConfigFlags;
 use imgui_render::Renderer;
 use imgui_sdl2_support::SdlPlatform;
-use math::Vector2;
-use misc::Color32;
 use sdl2::keyboard::Keycode;
-use ui::{font::FontPainter, painter::UiPainter};
+use ui::uiscript::{init_vm, UiScript};
 
 const TICK_INTERVAL: f32 = 1.0 / 60.0;
 const MAX_TICK_ACCUM: f32 = TICK_INTERVAL * 4.0;
@@ -90,10 +86,13 @@ fn main() {
         gl::DepthRangef(0.0, 1.0);
     }
 
+    sdl_video.gl_set_swap_interval(1).unwrap();
+
     // init basis decoder
     basis_universal::transcoder_init();
 
-    sdl_video.gl_set_swap_interval(1).unwrap();
+    // init script VM
+    let vm = init_vm();
 
     // create imgui context
     let mut imgui = imgui::Context::create();
@@ -108,11 +107,8 @@ fn main() {
     // fix crash on Pi Zero
     imgui.io_mut().config_flags.insert(ConfigFlags::NO_MOUSE_CURSOR_CHANGE);
 
-    // create UI painter
-    let mut painter = UiPainter::new(1024);
-    let test_texture = load_texture("content/textures/effects/glow.basis").unwrap();
-    let test_font = load_font("content/fonts/Roboto-Regular.ttf").unwrap();
-    let mut test_font_painter = FontPainter::new(&test_font);
+    // load UI script & test
+    let test_ui_script = UiScript::new(&vm, "test", "Test");
 
     // create game state
     let mut game_state = GameState::new();
@@ -183,6 +179,7 @@ fn main() {
         while delta_accum >= TICK_INTERVAL {
             delta_accum -= TICK_INTERVAL;
             game_state.tick(TICK_INTERVAL, gamepad.as_ref());
+            test_ui_script.update(&vm, TICK_INTERVAL);
         }
 
         // execute commands
@@ -193,32 +190,7 @@ fn main() {
         game_state.render(WindowData { width: win_size.0 as i32, height: win_size.1 as i32 });
 
         // draw UI
-        let mut ui_pass = painter.begin_pass(win_size);
-        ui_pass.draw_sprite(&test_texture,
-            Vector2::new(64.0, 64.0), 
-            None, 
-            Vector2::new(0.5, 0.5), 
-            45.0_f32.to_radians(),
-            None,
-            Color32::new(255, 255, 255, 255)
-        );
-        test_font_painter.draw_string(&mut ui_pass,
-            "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Mauris pretium tristique placerat. Phasellus et quam molestie, interdum augue at, interdum odio. Maecenas et nulla eu est ultrices auctor. Aliquam elementum, nulla sed consectetur convallis, massa elit laoreet felis, eu mattis lacus eros at est. Duis orci nisl, porttitor sed turpis vitae, pharetra commodo orci. Suspendisse non sapien odio. Aenean quis erat nulla. Suspendisse suscipit ac est in pellentesque. Maecenas ut ipsum risus. Morbi leo eros, porttitor non molestie eu, sollicitudin vel libero.",
-            18.0,
-            Color32::new(255, 32, 32, 255),
-            LayoutSettings {
-                x: 16.0,
-                y: 16.0,
-                max_width: Some(320.0),
-                max_height: None,
-                horizontal_align: HorizontalAlign::Left,
-                vertical_align: VerticalAlign::Top,
-                line_height: 1.0,
-                wrap_style: WrapStyle::Word,
-                wrap_hard_breaks: true
-            }
-        );
-        ui_pass.end();
+        test_ui_script.paint(&vm, win_size);
 
         let frame_end = sdl_timer.performance_counter();
 
