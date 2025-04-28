@@ -5,7 +5,7 @@ use rect_packer::{Packer, Rect};
 
 use crate::{asset_loader::FontHandle, graphics::texture::{Texture, TextureFormat}, math::Vector2, misc::{Color32, Rectangle}};
 
-use super::uiscript::UiPainter;
+use super::painter::UiPainter;
 
 pub struct FontPainter {
     font: FontHandle,
@@ -57,7 +57,15 @@ impl FontPainter {
         glyph_cache.insert(glyph, rect);
     }
 
-    pub fn draw_string(self: &mut Self, painter: &mut UiPainter, text: &str, size: f32, tint: Color32, layout: LayoutSettings) {
+    pub fn draw_string(self: &mut Self, painter: &mut UiPainter,
+        text: &str,
+        size: f32,
+        position: Vector2,
+        pivot: Vector2,
+        rotation: f32,
+        tint: Color32,
+        layout: LayoutSettings)
+    {
         let style = TextStyle::new(text, size, 0);
         
         self.layout.reset(&layout);
@@ -86,11 +94,11 @@ impl FontPainter {
 
             let glyph_rect = self.glyph_cache[&glyph.key];
 
-            painter.draw_sprite_impl(&self.atlas,
-                Vector2::new(glyph.x, glyph.y),
+            painter.draw_sprite(&self.atlas,
+                position,
                 Vector2::new(glyph_rect.w as f32, glyph_rect.h as f32),
-                Vector2::zero(),
-                0.0,
+                pivot - Vector2::new(glyph.x, glyph.y),
+                rotation,
                 glyph_rect,
                 tint);
         }

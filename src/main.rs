@@ -10,7 +10,7 @@ use imgui::ConfigFlags;
 use imgui_render::Renderer;
 use imgui_sdl2_support::SdlPlatform;
 use sdl2::keyboard::Keycode;
-use ui::uiscript::{init_vm, UiScript};
+use ui::uiscript::UiScript;
 
 const TICK_INTERVAL: f32 = 1.0 / 60.0;
 const MAX_TICK_ACCUM: f32 = TICK_INTERVAL * 4.0;
@@ -91,9 +91,6 @@ fn main() {
     // init basis decoder
     basis_universal::transcoder_init();
 
-    // init script VM
-    let vm = init_vm();
-
     // create imgui context
     let mut imgui = imgui::Context::create();
 
@@ -108,7 +105,7 @@ fn main() {
     imgui.io_mut().config_flags.insert(ConfigFlags::NO_MOUSE_CURSOR_CHANGE);
 
     // load UI script & test
-    let test_ui_script = UiScript::new(&vm, "test", "Test");
+    let mut test_ui_script = UiScript::new("content/scripts/test.rn", "TestUi");
 
     // create game state
     let mut game_state = GameState::new();
@@ -179,7 +176,7 @@ fn main() {
         while delta_accum >= TICK_INTERVAL {
             delta_accum -= TICK_INTERVAL;
             game_state.tick(TICK_INTERVAL, gamepad.as_ref());
-            test_ui_script.update(&vm, TICK_INTERVAL);
+            test_ui_script.update(TICK_INTERVAL);
         }
 
         // execute commands
@@ -190,7 +187,7 @@ fn main() {
         game_state.render(WindowData { width: win_size.0 as i32, height: win_size.1 as i32 });
 
         // draw UI
-        test_ui_script.paint(&vm, win_size);
+        test_ui_script.paint(win_size);
 
         let frame_end = sdl_timer.performance_counter();
 

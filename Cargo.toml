@@ -33,4 +33,4 @@ log = "0.4.27"
 shellwords = "1.1.0"
 clap = { version = "4.5.37", features = ["derive"] }
 fontdue = "0.9.3"
-ruwren = "0.4.10"
+rune = "0.14.0"

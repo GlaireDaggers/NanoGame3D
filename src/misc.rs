@@ -1,16 +1,23 @@
+use rune::{Any, ContextError, Module};
 use serde::Deserialize;
 
 use crate::math::{Vector3, Vector4};
 
 #[derive(Default, Clone, Copy)]
+#[derive(Any)]
 pub struct Color32 {
+    #[rune(get, set)]
     pub r: u8,
+    #[rune(get, set)]
     pub g: u8,
+    #[rune(get, set)]
     pub b: u8,
+    #[rune(get, set)]
     pub a: u8
 }
 
 impl Color32 {
+    #[rune::function(keep, path = Self::new)]
     pub fn new(r: u8, g: u8, b: u8, a: u8) -> Color32 {
         Color32 { r, g, b, a }
     }
@@ -27,19 +34,39 @@ impl Color32 {
     pub fn to_vec4(self: Self) -> Vector4 {
         Vector4::new(self.r as f32 / 255.0, self.g as f32 / 255.0, self.b as f32 / 255.0, self.a as f32 / 255.0)
     }
+
+    pub fn register_script(module: &mut Module) -> Result<(), ContextError> {
+        module.ty::<Self>()?;
+        module.function_meta(Self::new__meta)?;
+
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy)]
+#[derive(Any)]
 pub struct Rectangle {
+    #[rune(get, set)]
     pub x: i32,
+    #[rune(get, set)]
     pub y: i32,
+    #[rune(get, set)]
     pub w: i32,
+    #[rune(get, set)]
     pub h: i32
 }
 
 impl Rectangle {
+    #[rune::function(keep, path = Self::new)]
     pub fn new(x: i32, y: i32, w: i32, h: i32) -> Rectangle {
         Rectangle { x, y, w, h }
+    }
+
+    pub fn register_script(module: &mut Module) -> Result<(), ContextError> {
+        module.ty::<Self>()?;
+        module.function_meta(Self::new__meta)?;
+
+        Ok(())
     }
 }
 

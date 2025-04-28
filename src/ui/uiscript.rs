@@ -1,403 +1,372 @@
-use std::{fs, rc::Rc};
+use std::sync::Arc;
 
-use fontdue::layout::{HorizontalAlign, LayoutSettings, VerticalAlign};
-use ruwren::{create_module, get_slot_checked, Class, FunctionHandle, FunctionSignature, Handle, ModuleLibrary, ModuleScriptLoader, Printer, VMConfig, VMWrapper, VM};
+use fontdue::layout::{HorizontalAlign, LayoutSettings, VerticalAlign, WrapStyle};
+use rune::{runtime::{Function, InstAddress, Memory, Output, VmResult}, termcolor::{ColorChoice, StandardStream}, vm_try, Any, Context, ContextError, Diagnostics, FromValue, Module, Source, Sources, Value, Vm};
 
-use crate::{asset_loader::{load_font, load_material, load_texture, MaterialHandle, TextureHandle}, graphics::{buffer::Buffer, texture::Texture}, math::{Matrix4x4, Vector2, Vector3, Vector4}, misc::{Color32, Rectangle}};
+use crate::{asset_loader::{load_font, load_texture, TextureHandle}, math::Vector2, misc::{Color32, Rectangle}};
 
-use super::{font::FontPainter, ui_vertex::UiVertex};
+use super::{font::FontPainter, painter::UiPainter};
 
-struct WrenPrinter;
-
-impl Printer for WrenPrinter {
-    fn print(&mut self, s: String) {
-        if s == "\n" {
-            return;
-        }
-
-        log::info!("(SCRIPT) {}", s);
-    }
-}
-
-struct WrenLoader;
-
-impl ModuleScriptLoader for WrenLoader {
-    fn load_script(&mut self, name: String) -> Option<String> {
-        match fs::read_to_string(format!("content/scripts/{}.wren", name)) {
-            Ok(v) => Some(v),
-            Err(_) => None
-        }
-    }
-}
-
-struct ScriptTexture {
+#[derive(Any)]
+struct Texture {
+    #[allow(unused)]
     texture: TextureHandle,
 }
 
-impl Class for ScriptTexture {
-    fn initialize(vm: &VM) -> Self
-    where
-        Self: Sized {
-        let path = get_slot_checked!(vm => string 1);
-        
-        ScriptTexture { texture: load_texture(path.as_str()).unwrap() }
+impl Texture {
+    #[rune::function(path = Self::load)]
+    pub fn load(path: &str) -> Texture {
+        let texture = load_texture(path).unwrap();
+        Texture { texture }
+    }
+
+    #[rune::function(instance)]
+    pub fn width(&self) -> i32 {
+        self.texture.width()
+    }
+
+    #[rune::function(instance)]
+    pub fn height(&self) -> i32 {
+        self.texture.height()
+    }
+
+    pub fn register_script(module: &mut Module) -> Result<(), ContextError> {
+        module.ty::<Self>()?;
+        module.function_meta(Self::load)?;
+        module.function_meta(Self::width)?;
+        module.function_meta(Self::height)?;
+
+        Ok(())
     }
 }
 
-impl ScriptTexture {
-    pub fn width(&self, vm: &VM) {
-        vm.ensure_slots(1);
-        vm.set_slot_double(0, self.texture.width() as f64);
-    }
-
-    pub fn height(&self, vm: &VM) {
-        vm.ensure_slots(1);
-        vm.set_slot_double(0, self.texture.height() as f64);
-    }
+#[derive(Any)]
+enum HAlign {
+    #[rune(constructor)]
+    Left,
+    #[rune(constructor)]
+    Middle,
+    #[rune(constructor)]
+    Right,
 }
 
-struct ScriptFont {
+#[derive(Any)]
+enum VAlign {
+    #[rune(constructor)]
+    Top,
+    #[rune(constructor)]
+    Middle,
+    #[rune(constructor)]
+    Bottom,
+}
+
+#[derive(Any)]
+enum TextWrap {
+    #[rune(constructor)]
+    Word,
+    #[rune(constructor)]
+    Letter,
+}
+
+#[derive(Any)]
+struct Font {
+    #[allow(unused)]
     font: FontPainter,
 }
 
-impl Class for ScriptFont {
-    fn initialize(vm: &VM) -> Self
-    where
-        Self: Sized {
-        let path = get_slot_checked!(vm => string 1);
-        
-        let font = load_font(path.as_str()).unwrap();
-        ScriptFont { font: FontPainter::new(&font) }
+impl Font {
+    #[rune::function(path = Font::load)]
+    pub fn load(path: &str) -> Font {
+        let font = load_font(path).unwrap();
+        Font { font: FontPainter::new(&font) }
     }
-}
 
-impl ScriptFont {
-    pub fn draw_text(&mut self, vm: &VM) {
-        let painter = get_slot_checked!(vm => foreign_mut UiPainter => 1);
-        let text = get_slot_checked!(vm => string 2);
-        let size = get_slot_checked!(vm => num 3) as f32;
-        let px = get_slot_checked!(vm => num 4) as f32;
-        let py = get_slot_checked!(vm => num 5) as f32;
-        let cr = get_slot_checked!(vm => num 6) as f32;
-        let cg = get_slot_checked!(vm => num 7) as f32;
-        let cb = get_slot_checked!(vm => num 8) as f32;
-        let ca = get_slot_checked!(vm => num 9) as f32;
-        let color = Color32::from_vec4(Vector4::new(cr, cg, cb, ca));
+    pub fn draw_text(&mut self, painter: &mut Painter, text: &str, size: f32, position: Vector2, color: Color32) {
+        self.font.draw_string(&mut painter.painter, text, size, position, Vector2::zero(), 0.0, color, LayoutSettings::default());
+    }
 
+    pub fn draw_text_layout(&mut self, painter: &mut Painter,
+        text: &str,
+        size: f32,
+        position: Vector2,
+        pivot: Vector2,
+        rotation: f32,
+        width: f32,
+        height: f32,
+        h_align: HorizontalAlign,
+        v_align: VerticalAlign,
+        wrap: WrapStyle,
+        color: Color32)
+    {
         let mut layout = LayoutSettings::default();
-        layout.x = px;
-        layout.y = py;
+        layout.max_width = Some(width);
+        layout.max_height = Some(height);
+        layout.wrap_style = wrap;
+        layout.horizontal_align = h_align;
+        layout.vertical_align = v_align;
 
-        self.font.draw_string(painter, text.as_str(), size, color, layout);
+        self.font.draw_string(&mut painter.painter, text, size, position, pivot * size, rotation, color, layout);
     }
 
-    pub fn draw_text_layout(&mut self, vm: &VM) {
-        let painter = get_slot_checked!(vm => foreign_mut UiPainter => 1);
-        let text = get_slot_checked!(vm => string 2);
-        let size = get_slot_checked!(vm => num 3) as f32;
-        let px = get_slot_checked!(vm => num 4) as f32;
-        let py = get_slot_checked!(vm => num 5) as f32;
-        let w = get_slot_checked!(vm => num 6) as f32;
-        let h = get_slot_checked!(vm => num 7) as f32;
-        let halign = get_slot_checked!(vm => num 8) as i32;
-        let valign = get_slot_checked!(vm => num 9) as i32;
-        let cr = get_slot_checked!(vm => num 10) as f32;
-        let cg = get_slot_checked!(vm => num 11) as f32;
-        let cb = get_slot_checked!(vm => num 12) as f32;
-        let ca = get_slot_checked!(vm => num 13) as f32;
-        let color = Color32::from_vec4(Vector4::new(cr, cg, cb, ca));
+    fn draw_text_wrapper(stack: &mut dyn Memory, addr: InstAddress, args: usize, _: Output) -> VmResult<()> {
+        let args = vm_try!(stack.slice_at(addr, args));
 
-        let mut layout = LayoutSettings::default();
-        layout.x = px;
-        layout.y = py;
-        layout.max_width = Some(w);
-        layout.max_height = Some(h);
+        let mut this = vm_try!(args[0].borrow_mut::<Self>());
+        let mut painter = vm_try!(args[1].borrow_mut::<Painter>());
+        let text: String = vm_try!(String::from_value(args[2].clone()));
+        let size = vm_try!(args[3].as_float());
+        let position = vm_try!(Vector2::from_value(args[4].clone()));
+        let tint = vm_try!(Color32::from_value(args[5].clone()));
 
-        layout.horizontal_align = match halign {
-            0 => HorizontalAlign::Left,
-            1 => HorizontalAlign::Center,
-            2 => HorizontalAlign::Right,
-            _ => {
-                vm.set_slot_string(0, "Invalid horizontal align");
-                vm.abort_fiber(0);
-                return;
-            }
+        this.draw_text(&mut painter, &text, size as f32, position, tint);
+
+        VmResult::Ok(())
+    }
+
+    fn draw_text_layout_wrapper(stack: &mut dyn Memory, addr: InstAddress, args: usize, _: Output) -> VmResult<()> {
+        let args = vm_try!(stack.slice_at(addr, args));
+
+        let mut this = vm_try!(args[0].borrow_mut::<Self>());
+        let mut painter = vm_try!(args[1].borrow_mut::<Painter>());
+        let text: String = vm_try!(String::from_value(args[2].clone()));
+        let size = vm_try!(args[3].as_float());
+        let position = vm_try!(Vector2::from_value(args[4].clone()));
+        let pivot = vm_try!(Vector2::from_value(args[5].clone()));
+        let rotation = vm_try!(args[6].as_float());
+        let (width, height) = vm_try!(<(f32, f32)>::from_value(args[7].clone()));
+        let h_align = vm_try!(HAlign::from_value(args[8].clone()));
+        let v_align = vm_try!(VAlign::from_value(args[9].clone()));
+        let wrap = vm_try!(TextWrap::from_value(args[10].clone()));
+        let tint = vm_try!(Color32::from_value(args[11].clone()));
+
+        let h_align = match h_align {
+            HAlign::Left => HorizontalAlign::Left,
+            HAlign::Middle => HorizontalAlign::Center,
+            HAlign::Right => HorizontalAlign::Right
         };
 
-        layout.vertical_align = match valign {
-            0 => VerticalAlign::Top,
-            1 => VerticalAlign::Middle,
-            2 => VerticalAlign::Bottom,
-            _ => {
-                vm.set_slot_string(0, "Invalid vertical align");
-                vm.abort_fiber(0);
-                return;
-            }
+        let v_align = match v_align {
+            VAlign::Top => VerticalAlign::Top,
+            VAlign::Middle => VerticalAlign::Middle,
+            VAlign::Bottom => VerticalAlign::Bottom
         };
 
-        self.font.draw_string(painter, text.as_str(), size, color, layout);
+        let wrap = match wrap {
+            TextWrap::Letter => WrapStyle::Letter,
+            TextWrap::Word => WrapStyle::Word
+        };
+
+        this.draw_text_layout(&mut painter,
+            &text,
+            size as f32,
+            position,
+            pivot,
+            rotation.to_radians() as f32,
+            width,
+            height,
+            h_align,
+            v_align,
+            wrap,
+            tint);
+
+        VmResult::Ok(())
+    }
+
+    pub fn register_script(module: &mut Module) -> Result<(), ContextError> {
+        module.ty::<Self>()?;
+        module.function_meta(Self::load)?;
+
+        module.raw_function("draw_text", Self::draw_text_wrapper)
+            .build_associated::<Self>()?
+            .args(6)
+            .argument_types::<(Self, Painter, String, f32, Vector2, Color32)>()?;
+
+        module.raw_function("draw_text_layout", Self::draw_text_layout_wrapper)
+            .build_associated::<Self>()?
+            .args(12)
+            .argument_types::<(Self, Painter, String, f32, Vector2, Vector2, f32, (f32, f32), HAlign, VAlign, TextWrap, Color32)>()?;
+
+        Ok(())
     }
 }
 
-pub struct UiPainter {
-    texture: Option<u32>,
-    max_quads: usize,
-    material: MaterialHandle,
-    vertices: Vec<UiVertex>,
-    indices: Vec<u16>,
-    vertex_buffer: Buffer,
-    index_buffer: Buffer,
-    window_size: (u32, u32),
+#[derive(Any)]
+struct Painter {
+    #[allow(unused)]
+    painter: UiPainter,
 }
 
-impl Class for UiPainter {
-    fn initialize(vm: &VM) -> Self
-    where
-        Self: Sized {
-        let max_quads = get_slot_checked!(vm => num 1) as usize;
-
-        UiPainter {
-            texture: None,
-            max_quads,
-            material: load_material("content/materials/misc/ui.mat.ron").unwrap(),
-            vertices: Vec::with_capacity(max_quads * 4),
-            indices: Vec::with_capacity(max_quads * 6),
-            vertex_buffer: Buffer::new((max_quads * 4 * size_of::<UiVertex>()) as isize),
-            index_buffer: Buffer::new((max_quads * 6 * size_of::<u16>()) as isize),
-            window_size: (0, 0),
+impl Painter {
+    pub fn new(max_quads: usize) -> Painter {
+        Painter {
+            painter: UiPainter::new(max_quads)
         }
+    }
+
+    pub fn begin(&mut self, window_size: (u32, u32)) {
+        self.painter.begin(window_size);
+    }
+
+    pub fn end(&mut self) {
+        self.painter.end();
+    }
+
+    pub fn draw_sprite(&mut self, texture: &Texture, position: Vector2, size: Option<Vector2>, pivot: Vector2, rotation: f32, tex_rect: Option<Rectangle>, tint: Color32) {
+        let size = if let Some(v) = size {
+            v
+        }
+        else {
+            Vector2::new(texture.texture.width() as f32, texture.texture.height() as f32)
+        };
+
+        let tex_rect = if let Some(v) = tex_rect {
+            v
+        }
+        else {
+            Rectangle::new(0, 0, texture.texture.width(), texture.texture.height())
+        };
+
+        self.painter.draw_sprite(&texture.texture, position, size, pivot * size, rotation, tex_rect, tint);
+    }
+
+    pub fn draw_nineslice(&mut self, texture: &Texture,
+        position: Vector2,
+        size: Vector2,
+        pivot: Vector2,
+        rotation: f32,
+        tex_rect: Option<Rectangle>,
+        borders: (i32, i32, i32, i32),
+        color: Color32)
+    {
+        self.painter.draw_nineslice(&texture.texture, position, size, pivot * size, rotation, tex_rect, borders, color);
+    }
+
+    fn draw_sprite_wrapper(stack: &mut dyn Memory, addr: InstAddress, args: usize, _: Output) -> VmResult<()> {
+        let args = vm_try!(stack.slice_at(addr, args));
+
+        let mut this = vm_try!(args[0].borrow_mut::<Self>());
+        let texture = vm_try!(args[1].borrow_ref::<Texture>());
+        let position = vm_try!(Vector2::from_value(args[2].clone()));
+        let size = vm_try!(Option::<Vector2>::from_value(args[3].clone()));
+        let pivot = vm_try!(Vector2::from_value(args[4].clone()));
+        let rotation = vm_try!(args[5].as_float());
+        let tex_rect = vm_try!(Option::<Rectangle>::from_value(args[6].clone()));
+        let tint = vm_try!(Color32::from_value(args[7].clone()));
+
+        this.draw_sprite(&texture, position, size, pivot, rotation.to_radians() as f32, tex_rect, tint);
+
+        VmResult::Ok(())
+    }
+
+    fn draw_nineslice_wrapper(stack: &mut dyn Memory, addr: InstAddress, args: usize, _: Output) -> VmResult<()> {
+        let args = vm_try!(stack.slice_at(addr, args));
+
+        let mut this = vm_try!(args[0].borrow_mut::<Self>());
+        let texture = vm_try!(args[1].borrow_ref::<Texture>());
+        let position = vm_try!(Vector2::from_value(args[2].clone()));
+        let size = vm_try!(Vector2::from_value(args[3].clone()));
+        let pivot = vm_try!(Vector2::from_value(args[4].clone()));
+        let rotation = vm_try!(args[5].as_float());
+        let tex_rect = vm_try!(Option::<Rectangle>::from_value(args[6].clone()));
+        let borders = vm_try!(<(i32, i32, i32, i32)>::from_value(args[7].clone()));
+        let tint = vm_try!(Color32::from_value(args[8].clone()));
+
+        this.draw_nineslice(&texture, position, size, pivot, rotation.to_radians() as f32, tex_rect, borders, tint);
+
+        VmResult::Ok(())
+    }
+
+    pub fn register_script(module: &mut Module) -> Result<(), ContextError> {
+        module.ty::<Self>()?;
+
+        module.raw_function("draw_sprite", Self::draw_sprite_wrapper)
+            .build_associated::<Self>()?
+            .args(8)
+            .argument_types::<(Self, Texture, Vector2, Option<Vector2>, Vector2, f32, Option<Rectangle>, Color32)>()?;
+
+        module.raw_function("draw_nineslice", Self::draw_nineslice_wrapper)
+            .build_associated::<Self>()?
+            .args(9)
+            .argument_types::<(Self, Texture, Vector2, Vector2, Vector2, f32, Option<Rectangle>, (i32, i32, i32, i32), Color32)>()?;
+
+        Ok(())
     }
 }
 
-impl UiPainter {
-    fn flush_batch(self: &mut Self) {
-        if self.vertices.len() == 0 {
-            return;
+fn module() -> Result<Module, ContextError> {
+    let mut m = Module::new();
+    
+    Font::register_script(&mut m)?;
+    Texture::register_script(&mut m)?;
+    Painter::register_script(&mut m)?;
+    Vector2::register_script(&mut m)?;
+    Rectangle::register_script(&mut m)?;
+    Color32::register_script(&mut m)?;
+
+    m.ty::<HAlign>()?;
+    m.ty::<VAlign>()?;
+    m.ty::<TextWrap>()?;
+
+    Ok(m)
+}
+
+pub struct UiScript {
+    _vm: Vm,
+    painter: Painter,
+    instance: Value,
+    update_fn: Function,
+    paint_fn: Function,
+}
+
+impl UiScript {
+    pub fn new(script_path: &str, type_name: &str) -> UiScript {
+        let module = module().unwrap();
+
+        let mut context = Context::with_default_modules().unwrap();
+        context.install(module).unwrap();
+
+        let runtime = Arc::new(context.runtime().unwrap());
+
+        let mut sources = Sources::new();
+        sources.insert(Source::from_path(script_path).unwrap()).unwrap();
+
+        let mut diagnostics = Diagnostics::new();
+
+        let result = rune::prepare(&mut sources)
+            .with_context(&context)
+            .with_diagnostics(&mut diagnostics)
+            .build();
+
+        if !diagnostics.is_empty() {
+            let mut writer = StandardStream::stderr(ColorChoice::Always);
+            diagnostics.emit(&mut writer, &sources).unwrap();
         }
 
-        let tex = self.texture.as_ref().unwrap();
+        let unit = result.unwrap();
+        let mut vm = Vm::new(runtime, Arc::new(unit));
 
-        self.vertex_buffer.resize(self.vertex_buffer.size());
-        self.index_buffer.resize(self.index_buffer.size());
+        let update_fn = vm.lookup_function([type_name, "update"]).unwrap();
+        let paint_fn = vm.lookup_function([type_name, "paint"]).unwrap();
 
-        self.vertex_buffer.set_data(0, &self.vertices);
-        self.index_buffer.set_data(0, &self.indices);
-
-        let matrix = Matrix4x4::scale(Vector3::new(2.0 / self.window_size.0 as f32, -2.0 / self.window_size.1 as f32, 1.0))
-            * Matrix4x4::translation(Vector3::new(-1.0, 1.0, 0.0));
+        // construct new instance of script type
+        let instance = vm.call([type_name, "new"], ()).unwrap();
         
-        self.material.apply();
-        self.material.shader.set_uniform_mat4("mvp", matrix);
-
-        unsafe {
-            gl::ActiveTexture(gl::TEXTURE0);
-            gl::BindTexture(gl::TEXTURE_2D, *tex);
-
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32);
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32);
-
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as i32);
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as i32);
-
-            self.material.shader.inner.set_uniform_int("mainTexture", 0);
-
-            gl::BindBuffer(gl::ARRAY_BUFFER, self.vertex_buffer.handle());
-            gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, self.index_buffer.handle());
-
-            UiVertex::setup_vtx_arrays(&self.material.shader);
-
-            gl::DrawElements(gl::TRIANGLES, self.indices.len() as i32, gl::UNSIGNED_SHORT, 0 as *const _);
-        }
-
-        self.vertices.clear();
-        self.indices.clear();
-        self.texture = None;
-    }
-
-    pub fn begin(&mut self, vm: &VM) {
-        // width, height
-        let window_width = get_slot_checked!(vm => num 1) as u32;
-        let window_height = get_slot_checked!(vm => num 2) as u32;
-
-        self.window_size = (window_width, window_height);
-    }
-
-    pub fn end(&mut self, _: &VM) {
-        self.flush_batch();
-    }
-
-    pub fn draw_sprite_impl(&mut self, tex: &Texture, position: Vector2, size: Vector2, pivot: Vector2, rotation: f32, tex_rect: Rectangle, tint: Color32) {
-        if let Some(prev_tex) = &self.texture {
-            if *prev_tex != tex.handle() {
-                // flush batch
-                self.flush_batch();
-            }
-        }
-
-        if self.vertices.len() >= self.max_quads * 4 {
-            self.flush_batch();
-        }
-
-        self.texture = Some(tex.handle());
-
-        let offset = pivot * size * -1.0;
-
-        let pos_a = Vector2::new(0.0, 0.0) + offset;
-        let pos_b = Vector2::new(size.x, 0.0) + offset;
-        let pos_c = Vector2::new(0.0, size.y) + offset;
-        let pos_d = Vector2::new(size.x, size.y) + offset;
-
-        let pos_a = position + pos_a.rotate(rotation);
-        let pos_b = position + pos_b.rotate(rotation);
-        let pos_c = position + pos_c.rotate(rotation);
-        let pos_d = position + pos_d.rotate(rotation);
-
-        let uv_scale = 1.0 / Vector2::new(tex.width() as f32, tex.height() as f32);
-        let uv_min = Vector2::new(tex_rect.x as f32, tex_rect.y as f32) * uv_scale;
-        let uv_max = uv_min + (Vector2::new(tex_rect.w as f32, tex_rect.h as f32) * uv_scale);
-
-        let uv_a = Vector2::new(uv_min.x, uv_min.y);
-        let uv_b = Vector2::new(uv_max.x, uv_min.y);
-        let uv_c = Vector2::new(uv_min.x, uv_max.y);
-        let uv_d = Vector2::new(uv_max.x, uv_max.y);
-
-        let idx_base = self.vertices.len() as u16;
-
-        self.vertices.push(UiVertex { pos: pos_a, uv: uv_a, col: tint });
-        self.vertices.push(UiVertex { pos: pos_b, uv: uv_b, col: tint });
-        self.vertices.push(UiVertex { pos: pos_c, uv: uv_c, col: tint });
-        self.vertices.push(UiVertex { pos: pos_d, uv: uv_d, col: tint });
-
-        self.indices.push(idx_base);
-        self.indices.push(idx_base + 1);
-        self.indices.push(idx_base + 2);
-
-        self.indices.push(idx_base + 1);
-        self.indices.push(idx_base + 3);
-        self.indices.push(idx_base + 2);
-    }
-
-    pub fn draw_sprite(&mut self, vm: &VM) {
-        // texture
-        // position x, y
-        // size x, y
-        // pivot x, y
-        // rotation
-        // tex rect x, y, w, h
-        // tint r, g, b, a
-        let tex = get_slot_checked!(vm => foreign ScriptTexture => 1);
-        let px = get_slot_checked!(vm => num 2) as f32;
-        let py = get_slot_checked!(vm => num 3) as f32;
-        let sx = get_slot_checked!(vm => num 4) as f32;
-        let sy = get_slot_checked!(vm => num 5) as f32;
-        let ax = get_slot_checked!(vm => num 6) as f32;
-        let ay = get_slot_checked!(vm => num 7) as f32;
-        let rot = get_slot_checked!(vm => num 8) as f32;
-        let tx = get_slot_checked!(vm => num 9) as i32;
-        let ty = get_slot_checked!(vm => num 10) as i32;
-        let tw = get_slot_checked!(vm => num 11) as i32;
-        let th = get_slot_checked!(vm => num 12) as i32;
-        let cr = get_slot_checked!(vm => num 13) as f32;
-        let cg = get_slot_checked!(vm => num 14) as f32;
-        let cb = get_slot_checked!(vm => num 15) as f32;
-        let ca = get_slot_checked!(vm => num 16) as f32;
-
-        let position = Vector2::new(px, py);
-        let size = Vector2::new(sx, sy);
-        let pivot = Vector2::new(ax, ay);
-        let rot = rot.to_radians();
-        let tex_rect = Rectangle::new(tx, ty, tw, th);
-        let color = Color32::from_vec4(Vector4::new(cr, cg, cb, ca));
-
-        self.draw_sprite_impl(&tex.texture, position, size, pivot, rot, tex_rect, color);
-    }
-}
-
-create_module! {
-    class("Painter") crate::ui::uiscript::UiPainter => painter {
-        instance(fn "begin", 2) begin,
-        instance(fn "end", 0) end,
-        instance(fn "draw_sprite", 16) draw_sprite
-    }
-
-    class("Texture") crate::ui::uiscript::ScriptTexture => texture {
-        instance(getter "width") width,
-        instance(getter "height") height
-    }
-
-    class("Font") crate::ui::uiscript::ScriptFont => font {
-        instance(fn "draw_text", 9) draw_text,
-        instance(fn "draw_text", 13) draw_text_layout
-    }
-
-    module => engine
-}
-
-pub fn init_vm() -> VMWrapper {
-    let mut lib = ModuleLibrary::new();
-    engine::publish_module(&mut lib);
-
-    VMConfig::new()
-        .printer(WrenPrinter {})
-        .script_loader(WrenLoader {})
-        .enable_relative_import(true)
-        .library(&lib)
-        .build()
-}
-
-pub struct UiScript<'a> {
-    update_fn: Rc<FunctionHandle<'a>>,
-    paint_fn: Rc<FunctionHandle<'a>>,
-    script_instance: Rc<Handle<'a>>,
-}
-
-impl<'a> UiScript<'a> {
-    pub fn new(vm: &'a VMWrapper, module_name: &str, class_name: &str) -> UiScript<'a> {
-        // load script
-        let bootstrap = format!(
-            r##"
-            import "{module_name}" for {class_name}
-            var script_instance = {class_name}.new()
-            "##
-        );
-        vm.interpret("main", bootstrap).unwrap();
-
-        // get handle to script instance
-        let paint_fn = vm.make_call_handle(FunctionSignature::new_function("paint", 2));
-        let update_fn = vm.make_call_handle(FunctionSignature::new_function("update", 1));
-        let script_instance = {
-            vm.execute(|vm| {
-                vm.ensure_slots(1);
-                vm.get_variable("main", "script_instance", 0);
-            });
-            vm.get_slot_handle(0)
-        };
-
         UiScript {
-            paint_fn,
+            _vm: vm,
+            painter: Painter::new(1024),
+            instance,
             update_fn,
-            script_instance,
+            paint_fn,
         }
     }
 
-    pub fn update(&self, vm: &'a VMWrapper, delta: f32) {
-        vm.execute(|vm| {
-            vm.ensure_slots(2);
-            vm.set_slot_double(1, delta as f64);
-        });
-
-        vm.set_slot_handle(0, &self.script_instance);
-        vm.call_handle(&self.update_fn).unwrap();
+    pub fn update(&mut self, delta: f32) {
+        self.update_fn.call::<()>((&self.instance, delta,)).unwrap();
     }
 
-    pub fn paint(&self, vm: &'a VMWrapper, window_size: (u32, u32)) {
-        vm.execute(|vm| {
-            vm.ensure_slots(3);
-            vm.set_slot_double(1, window_size.0 as f64);
-            vm.set_slot_double(2, window_size.1 as f64);
-        });
-
-        vm.set_slot_handle(0, &self.script_instance);
-        vm.call_handle(&self.paint_fn).unwrap();
+    pub fn paint(&mut self, window_size: (u32, u32)) {
+        self.painter.begin(window_size);
+        self.paint_fn.call::<()>((&self.instance, window_size.0 as i32, window_size.1 as i32, &mut self.painter,)).unwrap();
+        self.painter.end();
     }
 }

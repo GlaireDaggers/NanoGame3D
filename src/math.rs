@@ -1,30 +1,40 @@
 use std::ops;
 
+use rune::{Any, ContextError, Module};
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
+#[derive(Any)]
 pub struct Vector2 {
+    #[rune(get, set)]
     pub x: f32,
+    #[rune(get, set)]
     pub y: f32,
 }
 
 impl Vector2 {
+    #[rune::function(keep, path = Self::new)]
     pub const fn new(x: f32, y: f32) -> Vector2 {
         return Vector2 { x: x, y: y };
     }
 
+    #[rune::function(keep, path = Self::zero)]
     pub const fn zero() -> Vector2 {
         return Vector2 { x: 0.0, y: 0.0 };
     }
 
+    #[rune::function(keep, path = Self::unit_x)]
     pub const fn unit_x() -> Vector2 {
         return Vector2 { x: 1.0, y: 0.0 };
     }
     
+    #[rune::function(keep, path = Self::unit_y)]
     pub const fn unit_y() -> Vector2 {
         return Vector2 { x: 0.0, y: 1.0 };
     }
 
     /// Compute the squared distance between two vectors
+    #[rune::function(keep, path = Self::distance_sq)]
     pub fn distance_sq(lhs: &Vector2, rhs: &Vector2) -> f32 {
         let dx = lhs.x - rhs.x;
         let dy = lhs.y - rhs.y;
@@ -32,6 +42,7 @@ impl Vector2 {
     }
 
     /// Compute the distance between two vectors
+    #[rune::function(keep, path = Self::distance)]
     pub fn distance(lhs: &Vector2, rhs: &Vector2) -> f32 {
         let dx = lhs.x - rhs.x;
         let dy = lhs.y - rhs.y;
@@ -39,16 +50,19 @@ impl Vector2 {
     }
 
     /// Compute the squared length of the vector
+    #[rune::function(keep)]
     pub fn length_sq(self) -> f32 {
         return (self.x * self.x) + (self.y * self.y);
     }
 
     /// Compute the length of the vector
+    #[rune::function(keep)]
     pub fn length(self) -> f32 {
         return ((self.x * self.x) + (self.y * self.y)).sqrt();
     }
 
     /// Normalize the vector
+    #[rune::function(keep)]
     pub fn normalize(&mut self) {
         let mag = 1.0 / (self.x * self.x + self.y * self.y).sqrt();
         self.x *= mag;
@@ -56,22 +70,26 @@ impl Vector2 {
     }
 
     /// Produce a normalized copy of the vector
+    #[rune::function(keep)]
     pub fn normalized(&self) -> Vector2 {
         let mag = 1.0 / (self.x * self.x + self.y * self.y).sqrt();
         return Vector2 { x: self.x * mag, y: self.y * mag };
     }
 
     /// Compute the dot product of two vectors
+    #[rune::function(keep)]
     pub fn dot(self: &Vector2, rhs: Vector2) -> f32 {
         return (self.x * rhs.x) + (self.y * rhs.y);
     }
 
     /// Compute linear interpolation between vectors
+    #[rune::function(keep, path = Self::lerp)]
     pub fn lerp(v1: Self, v2: Self, t: f32) -> Self {
         (v1 * (1.0 - t)) + (v2 * t)
     }
 
     /// Rotate a 2D position by the given angle around origin
+    #[rune::function(keep)]
     pub fn rotate(self: &Vector2, angle: f32) -> Self {
         let ca = angle.cos();
         let sa = angle.sin();
@@ -80,6 +98,25 @@ impl Vector2 {
         let y = (sa * self.x) + (ca * self.y);
 
         Vector2::new(x, y)
+    }
+
+    pub fn register_script(module: &mut Module) -> Result<(), ContextError> {
+        module.ty::<Self>()?;
+        module.function_meta(Self::new__meta)?;
+        module.function_meta(Self::zero__meta)?;
+        module.function_meta(Self::unit_x__meta)?;
+        module.function_meta(Self::unit_y__meta)?;
+        module.function_meta(Self::distance_sq__meta)?;
+        module.function_meta(Self::distance__meta)?;
+        module.function_meta(Self::length_sq__meta)?;
+        module.function_meta(Self::length__meta)?;
+        module.function_meta(Self::normalize__meta)?;
+        module.function_meta(Self::normalized__meta)?;
+        module.function_meta(Self::dot__meta)?;
+        module.function_meta(Self::lerp__meta)?;
+        module.function_meta(Self::rotate__meta)?;
+
+        Ok(())
     }
 }
 
