@@ -1,15 +1,48 @@
+mod window;
+
+use window::Window;
+
 pub struct TestUi {
     rot,
     test_font,
     test_texture,
+    win,
 }
 
 impl TestUi {
     pub fn new() {
+        let font = Font::load("content/fonts/Roboto-Regular.ttf");
+        let tex = Texture::load("content/textures/effects/glow.basis");
+
         TestUi {
             rot: 0.0,
-            test_font: Font::load("content/fonts/Roboto-Regular.ttf"),
-            test_texture: Texture::load("content/textures/effects/glow.basis"),
+            test_font: font,
+            test_texture: tex,
+            win: Window::new()
+                .with_anchors(Vector2::new(0.5, 0.0), Vector2::new(0.5, 0.0))
+                .with_pos_delta(Vector2::new(-64.0, 0.0))
+                .with_size_delta(Vector2::new(128.0, 64.0))
+                .with_paint_fn(|painter, screen_pos, screen_size| {
+                    painter.draw_sprite(tex,
+                        screen_pos.copy(),
+                        Some(screen_size.copy()),
+                        Vector2::zero(),
+                        0.0,
+                        None,
+                        Color32::new(255, 255, 255, 255));
+
+                    painter.draw_text_layout(font,
+                        "Hello, world!",
+                        16.0,                               // font size
+                        screen_pos.copy(),                  // position
+                        screen_size.copy(),                 // size
+                        Vector2::zero(),                    // pivot
+                        0.0,                                // rotation
+                        HAlign::Middle,
+                        VAlign::Middle,
+                        TextWrap::Word,
+                        Color32::new(255, 32, 32, 255));
+                })
         }
     }
 
@@ -18,30 +51,6 @@ impl TestUi {
     }
 
     pub fn paint(self, screen_width, screen_height, painter) {
-        painter.draw_sprite(self.test_texture,
-            Vector2::new(64.0, 64.0),           // position
-            None,                               // size
-            Vector2::new(0.5, 0.5),             // pivot
-            self.rot,                           // rotation
-            None,                               // texture rect
-            Color32::new(255, 255, 255, 255));
-
-        self.test_font.draw_text(painter,
-            "Hello, NanoGame3D!",
-            16.0,                               // font size
-            Vector2::zero(),                    // position
-            Color32::new(255, 255, 255, 255));
-
-        self.test_font.draw_text_layout(painter,
-            "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed interdum leo non arcu elementum sollicitudin. Etiam porttitor lorem eu diam dictum tempus. Suspendisse semper pellentesque nibh id posuere. Phasellus molestie rhoncus tincidunt. Pellentesque vel sagittis dolor. Sed porttitor luctus diam, quis malesuada lorem tempor vel. Nullam id porttitor tortor, sit amet tincidunt felis. Etiam ullamcorper, mauris non dictum sagittis, libero ligula tempus diam, dapibus scelerisque magna lectus in urna. Suspendisse vehicula eros id urna vulputate mattis. Mauris quis dolor a lectus efficitur efficitur. Interdum et malesuada fames ac ante ipsum primis in faucibus. Integer condimentum odio a cursus blandit. Duis massa elit, facilisis vel facilisis eget, aliquam in velit.",
-            16.0,                               // font size
-            Vector2::new(0.0, 16.0),            // position
-            Vector2::zero(),                    // pivot
-            0.0,                                // rotation
-            (256.0, 256.0),                     // width, height
-            HAlign::Left,
-            VAlign::Top,
-            TextWrap::Word,
-            Color32::new(255, 32, 32, 255));
+        self.win.paint(screen_width, screen_height, painter);
     }
 }

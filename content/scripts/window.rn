@@ -1,0 +1,79 @@
+use crate::Vector2;
+use crate::Rectangle;
+
+pub struct Window {
+    pos_delta,
+    size_delta,
+    anchor_min,
+    anchor_max,
+    draw_frame,
+    content_padding,
+    paint_fn,
+}
+
+impl Window {
+    pub fn new() {
+        Window {
+            pos_delta: Vector2::zero(),
+            size_delta: Vector2::zero(),
+            anchor_min: Vector2::zero(),
+            anchor_max: Vector2::zero(),
+            draw_frame: true,
+            content_padding: (0, 0, 0, 0),
+            paint_fn: None,
+        }
+    }
+
+    pub fn with_pos_delta(self, value) {
+        self.pos_delta = value;
+        self
+    }
+
+    pub fn with_size_delta(self, value) {
+        self.size_delta = value;
+        self
+    }
+
+    pub fn with_anchors(self, min, max) {
+        self.anchor_min = min;
+        self.anchor_max = max;
+        self
+    }
+
+    pub fn with_draw_frame(self, value) {
+        self.draw_frame = value;
+        self
+    }
+
+    pub fn with_content_padding(self, value) {
+        self.content_padding = value;
+        self
+    }
+
+    pub fn with_paint_fn(self, value) {
+        self.paint_fn = Some(value);
+        self
+    }
+
+    pub fn paint(self, screen_width, screen_height, painter) {
+        // calculate position & size
+        let anchor_min = Vector2::new(screen_width as f64 * self.anchor_min.x, screen_height as f64 * self.anchor_min.y);
+        let anchor_max = Vector2::new(screen_width as f64 * self.anchor_max.x, screen_height as f64 * self.anchor_max.y);
+
+        let real_min = anchor_min + self.pos_delta;
+        let real_max = anchor_max + self.pos_delta + self.size_delta;
+
+        let content_min = real_min + Vector2::new(self.content_padding.0 as f64, self.content_padding.1 as f64);
+        let content_max = real_max - Vector2::new(self.content_padding.2 as f64, self.content_padding.3 as f64);
+
+        let content_size = content_max - content_min;
+
+        match self.paint_fn {
+            Some(v) => {
+                v(painter, content_min, content_size);
+            }
+            None => {
+            }
+        }
+    }
+}

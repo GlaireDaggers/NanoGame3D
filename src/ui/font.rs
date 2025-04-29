@@ -20,7 +20,7 @@ impl FontPainter {
         FontPainter {
             font: font.clone(),
             atlas: Texture::new(TextureFormat::RGBA8888, 1024, 1024, 1),
-            atlas_packer: Packer::new(rect_packer::Config { width: 1024, height: 1024, border_padding: 0, rectangle_padding: 0 }),
+            atlas_packer: Packer::new(rect_packer::Config { width: 1024, height: 1024, border_padding: 1, rectangle_padding: 1 }),
             glyph_cache: HashMap::new(),
             layout: Layout::new(CoordinateSystem::PositiveYDown),
         }

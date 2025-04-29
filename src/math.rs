@@ -1,6 +1,6 @@
 use std::ops;
 
-use rune::{Any, ContextError, Module};
+use rune::{alloc::fmt::TryWrite, runtime::{Formatter, VmResult}, vm_try, Any, ContextError, Module};
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -100,6 +100,37 @@ impl Vector2 {
         Vector2::new(x, y)
     }
 
+    #[rune::function(protocol = ADD)]
+    fn add(&self, rhs: &Vector2) -> Vector2 {
+        *self + *rhs
+    }
+
+    #[rune::function(protocol = SUB)]
+    fn sub(&self, rhs: &Vector2) -> Vector2 {
+        *self - *rhs
+    }
+
+    #[rune::function(protocol = MUL)]
+    fn mul(&self, rhs: &Vector2) -> Vector2 {
+        *self * *rhs
+    }
+
+    #[rune::function(protocol = DIV)]
+    fn div(&self, rhs: &Vector2) -> Vector2 {
+        *self / *rhs
+    }
+
+    #[rune::function(protocol = DISPLAY_FMT)]
+    fn fmt(self: &Vector2, f: &mut Formatter) -> VmResult<()> {
+        vm_try!(write!(f, "({}, {})", self.x, self.y));
+        VmResult::Ok(())
+    }
+
+    #[rune::function(instance)]
+    fn copy(&self) -> Vector2 {
+        *self
+    }
+
     pub fn register_script(module: &mut Module) -> Result<(), ContextError> {
         module.ty::<Self>()?;
         module.function_meta(Self::new__meta)?;
@@ -115,6 +146,13 @@ impl Vector2 {
         module.function_meta(Self::dot__meta)?;
         module.function_meta(Self::lerp__meta)?;
         module.function_meta(Self::rotate__meta)?;
+
+        module.function_meta(Self::add)?;
+        module.function_meta(Self::sub)?;
+        module.function_meta(Self::mul)?;
+        module.function_meta(Self::div)?;
+        module.function_meta(Self::fmt)?;
+        module.function_meta(Self::copy)?;
 
         Ok(())
     }

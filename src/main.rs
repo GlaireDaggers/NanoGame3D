@@ -69,7 +69,7 @@ fn main() {
     }
 
     let window = sdl_video
-        .window("NanoGame3D", 640, 360)
+        .window("NanoGame3D", 1280, 720)
         .opengl()
         .resizable()
         .build()

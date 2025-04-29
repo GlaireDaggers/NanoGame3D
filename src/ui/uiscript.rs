@@ -1,7 +1,7 @@
-use std::sync::Arc;
+use std::{io::{Read, Write}, sync::Arc};
 
 use fontdue::layout::{HorizontalAlign, LayoutSettings, VerticalAlign, WrapStyle};
-use rune::{runtime::{Function, InstAddress, Memory, Output, VmResult}, termcolor::{ColorChoice, StandardStream}, vm_try, Any, Context, ContextError, Diagnostics, FromValue, Module, Source, Sources, Value, Vm};
+use rune::{runtime::{Function, InstAddress, Memory, Output, VmResult}, termcolor::WriteColor, vm_try, Any, Context, ContextError, Diagnostics, FromValue, Module, Source, Sources, Value, Vm};
 
 use crate::{asset_loader::{load_font, load_texture, TextureHandle}, math::Vector2, misc::{Color32, Rectangle}};
 
@@ -108,83 +108,9 @@ impl Font {
         self.font.draw_string(&mut painter.painter, text, size, position, pivot * size, rotation, color, layout);
     }
 
-    fn draw_text_wrapper(stack: &mut dyn Memory, addr: InstAddress, args: usize, _: Output) -> VmResult<()> {
-        let args = vm_try!(stack.slice_at(addr, args));
-
-        let mut this = vm_try!(args[0].borrow_mut::<Self>());
-        let mut painter = vm_try!(args[1].borrow_mut::<Painter>());
-        let text: String = vm_try!(String::from_value(args[2].clone()));
-        let size = vm_try!(args[3].as_float());
-        let position = vm_try!(Vector2::from_value(args[4].clone()));
-        let tint = vm_try!(Color32::from_value(args[5].clone()));
-
-        this.draw_text(&mut painter, &text, size as f32, position, tint);
-
-        VmResult::Ok(())
-    }
-
-    fn draw_text_layout_wrapper(stack: &mut dyn Memory, addr: InstAddress, args: usize, _: Output) -> VmResult<()> {
-        let args = vm_try!(stack.slice_at(addr, args));
-
-        let mut this = vm_try!(args[0].borrow_mut::<Self>());
-        let mut painter = vm_try!(args[1].borrow_mut::<Painter>());
-        let text: String = vm_try!(String::from_value(args[2].clone()));
-        let size = vm_try!(args[3].as_float());
-        let position = vm_try!(Vector2::from_value(args[4].clone()));
-        let pivot = vm_try!(Vector2::from_value(args[5].clone()));
-        let rotation = vm_try!(args[6].as_float());
-        let (width, height) = vm_try!(<(f32, f32)>::from_value(args[7].clone()));
-        let h_align = vm_try!(HAlign::from_value(args[8].clone()));
-        let v_align = vm_try!(VAlign::from_value(args[9].clone()));
-        let wrap = vm_try!(TextWrap::from_value(args[10].clone()));
-        let tint = vm_try!(Color32::from_value(args[11].clone()));
-
-        let h_align = match h_align {
-            HAlign::Left => HorizontalAlign::Left,
-            HAlign::Middle => HorizontalAlign::Center,
-            HAlign::Right => HorizontalAlign::Right
-        };
-
-        let v_align = match v_align {
-            VAlign::Top => VerticalAlign::Top,
-            VAlign::Middle => VerticalAlign::Middle,
-            VAlign::Bottom => VerticalAlign::Bottom
-        };
-
-        let wrap = match wrap {
-            TextWrap::Letter => WrapStyle::Letter,
-            TextWrap::Word => WrapStyle::Word
-        };
-
-        this.draw_text_layout(&mut painter,
-            &text,
-            size as f32,
-            position,
-            pivot,
-            rotation.to_radians() as f32,
-            width,
-            height,
-            h_align,
-            v_align,
-            wrap,
-            tint);
-
-        VmResult::Ok(())
-    }
-
     pub fn register_script(module: &mut Module) -> Result<(), ContextError> {
         module.ty::<Self>()?;
         module.function_meta(Self::load)?;
-
-        module.raw_function("draw_text", Self::draw_text_wrapper)
-            .build_associated::<Self>()?
-            .args(6)
-            .argument_types::<(Self, Painter, String, f32, Vector2, Color32)>()?;
-
-        module.raw_function("draw_text_layout", Self::draw_text_layout_wrapper)
-            .build_associated::<Self>()?
-            .args(12)
-            .argument_types::<(Self, Painter, String, f32, Vector2, Vector2, f32, (f32, f32), HAlign, VAlign, TextWrap, Color32)>()?;
 
         Ok(())
     }
@@ -276,6 +202,70 @@ impl Painter {
         VmResult::Ok(())
     }
 
+    fn draw_text_wrapper(stack: &mut dyn Memory, addr: InstAddress, args: usize, _: Output) -> VmResult<()> {
+        let args = vm_try!(stack.slice_at(addr, args));
+
+        let mut this = vm_try!(args[0].borrow_mut::<Self>());
+        let mut font = vm_try!(args[1].borrow_mut::<Font>());
+        let text: String = vm_try!(String::from_value(args[2].clone()));
+        let size = vm_try!(args[3].as_float());
+        let position = vm_try!(Vector2::from_value(args[4].clone()));
+        let tint = vm_try!(Color32::from_value(args[5].clone()));
+
+        font.draw_text(&mut this, &text, size as f32, position, tint);
+
+        VmResult::Ok(())
+    }
+
+    fn draw_text_layout_wrapper(stack: &mut dyn Memory, addr: InstAddress, args: usize, _: Output) -> VmResult<()> {
+        let args = vm_try!(stack.slice_at(addr, args));
+
+        let mut this = vm_try!(args[0].borrow_mut::<Self>());
+        let mut font = vm_try!(args[1].borrow_mut::<Font>());
+        let text: String = vm_try!(String::from_value(args[2].clone()));
+        let size = vm_try!(args[3].as_float());
+        let position = vm_try!(Vector2::from_value(args[4].clone()));
+        let boxsize = vm_try!(Vector2::from_value(args[5].clone()));
+        let pivot = vm_try!(Vector2::from_value(args[6].clone()));
+        let rotation = vm_try!(args[7].as_float());
+        let h_align = vm_try!(HAlign::from_value(args[8].clone()));
+        let v_align = vm_try!(VAlign::from_value(args[9].clone()));
+        let wrap = vm_try!(TextWrap::from_value(args[10].clone()));
+        let tint = vm_try!(Color32::from_value(args[11].clone()));
+
+        let h_align = match h_align {
+            HAlign::Left => HorizontalAlign::Left,
+            HAlign::Middle => HorizontalAlign::Center,
+            HAlign::Right => HorizontalAlign::Right
+        };
+
+        let v_align = match v_align {
+            VAlign::Top => VerticalAlign::Top,
+            VAlign::Middle => VerticalAlign::Middle,
+            VAlign::Bottom => VerticalAlign::Bottom
+        };
+
+        let wrap = match wrap {
+            TextWrap::Letter => WrapStyle::Letter,
+            TextWrap::Word => WrapStyle::Word
+        };
+
+        font.draw_text_layout(&mut this,
+            &text,
+            size as f32,
+            position,
+            pivot,
+            rotation.to_radians() as f32,
+            boxsize.x,
+            boxsize.y,
+            h_align,
+            v_align,
+            wrap,
+            tint);
+
+        VmResult::Ok(())
+    }
+
     pub fn register_script(module: &mut Module) -> Result<(), ContextError> {
         module.ty::<Self>()?;
 
@@ -288,6 +278,16 @@ impl Painter {
             .build_associated::<Self>()?
             .args(9)
             .argument_types::<(Self, Texture, Vector2, Vector2, Vector2, f32, Option<Rectangle>, (i32, i32, i32, i32), Color32)>()?;
+
+        module.raw_function("draw_text", Self::draw_text_wrapper)
+            .build_associated::<Self>()?
+            .args(6)
+            .argument_types::<(Self, Painter, String, f32, Vector2, Color32)>()?;
+
+        module.raw_function("draw_text_layout", Self::draw_text_layout_wrapper)
+            .build_associated::<Self>()?
+            .args(12)
+            .argument_types::<(Self, Painter, String, f32, Vector2, Vector2, Vector2, f32, HAlign, VAlign, TextWrap, Color32)>()?;
 
         Ok(())
     }
@@ -310,7 +310,59 @@ fn module() -> Result<Module, ContextError> {
     Ok(m)
 }
 
+struct ScriptErrorLogger {
+    buffer: String,
+}
+
+impl ScriptErrorLogger {
+    pub fn new() -> ScriptErrorLogger {
+        ScriptErrorLogger { buffer: String::new() }
+    }
+}
+
+impl Write for ScriptErrorLogger {
+    fn write(&mut self, mut buf: &[u8]) -> std::io::Result<usize> {
+        let src_len = buf.len();
+
+        let mut str = String::new();
+        buf.read_to_string(&mut str).unwrap();
+
+        self.buffer += &str;
+
+        Ok(src_len)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        if self.buffer.len() > 0 {
+            log::error!("(SCRIPT) {}", self.buffer.trim_end());
+        }
+        self.buffer.clear();
+        Ok(())
+    }
+}
+
+impl Drop for ScriptErrorLogger {
+    fn drop(&mut self) {
+        self.flush().unwrap();
+    }
+}
+
+impl WriteColor for ScriptErrorLogger {
+    fn supports_color(&self) -> bool {
+        false
+    }
+
+    fn set_color(&mut self, _spec: &rune::termcolor::ColorSpec) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn reset(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 pub struct UiScript {
+    sources: Sources,
     _vm: Vm,
     painter: Painter,
     instance: Value,
@@ -338,7 +390,7 @@ impl UiScript {
             .build();
 
         if !diagnostics.is_empty() {
-            let mut writer = StandardStream::stderr(ColorChoice::Always);
+            let mut writer = ScriptErrorLogger::new();
             diagnostics.emit(&mut writer, &sources).unwrap();
         }
 
@@ -352,6 +404,7 @@ impl UiScript {
         let instance = vm.call([type_name, "new"], ()).unwrap();
         
         UiScript {
+            sources,
             _vm: vm,
             painter: Painter::new(1024),
             instance,
@@ -366,7 +419,13 @@ impl UiScript {
 
     pub fn paint(&mut self, window_size: (u32, u32)) {
         self.painter.begin(window_size);
-        self.paint_fn.call::<()>((&self.instance, window_size.0 as i32, window_size.1 as i32, &mut self.painter,)).unwrap();
+        match self.paint_fn.call::<()>((&self.instance, window_size.0 as i32, window_size.1 as i32, &mut self.painter,)) {
+            VmResult::Ok(_) => {},
+            VmResult::Err(vm_error) => {
+                let mut writer = ScriptErrorLogger::new();
+                vm_error.emit(&mut writer, &self.sources).unwrap();
+            },
+        }
         self.painter.end();
     }
 }
